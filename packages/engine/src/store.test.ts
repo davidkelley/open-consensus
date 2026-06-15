@@ -89,6 +89,12 @@ describe('EngineStore', () => {
     expect(round?.state).toBe('complete')
     expect(round?.verdict).toBe('degraded') // 1 ok < quorum 2
     expect(round?.invocations.find((i) => i.agentId === 'b')?.status).toBe('interrupted')
+
+    // The repair is recorded in the durable log (terminal transition for the
+    // interrupted agent + the round verdict), so an SSE replay stays consistent.
+    const types = store.readEvents().map((e) => JSON.parse(e.payload).type)
+    expect(types).toContain('invocation-finished')
+    expect(types).toContain('round-completed')
   })
 
   it('prunes a run with its rounds, invocations, and raw blobs', () => {

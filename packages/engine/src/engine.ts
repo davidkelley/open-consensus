@@ -169,8 +169,11 @@ export class Engine {
       state: 'running',
       createdAt: this.now(),
     }
-    this.store.createRun(run)
-    this.persistEvent(run.runId, { type: 'run-created', runId: run.runId, panelId })
+    this.persistWith(run.runId, () => this.store.createRun(run), {
+      type: 'run-created',
+      runId: run.runId,
+      panelId,
+    })
     return run
   }
 
@@ -183,20 +186,19 @@ export class Engine {
   ): Promise<RoundRecord> {
     const roundId = randomUUID()
     const index = this.store.countRounds(run.runId)
-    // Atomically start the round AND insert a `pending` row for EVERY agent, so
-    // a crash mid-setup never leaves a `running` round with a partial agent set
-    // that reconcile would mis-verdict (D15).
-    this.store.startRoundWithPending(
-      { roundId, runId: run.runId, index, prompt, quorum: panel.quorum, state: 'running' },
-      panel.agents.map((a) => a.agentId),
+    const agentIds = panel.agents.map((a) => a.agentId)
+    // Atomically start the round, insert a `pending` row for EVERY agent, and log
+    // round-started — so a crash mid-setup never leaves a `running` round with a
+    // partial agent set that reconcile would mis-verdict (D15).
+    this.persistWith(
+      run.runId,
+      () =>
+        this.store.startRoundWithPending(
+          { roundId, runId: run.runId, index, prompt, quorum: panel.quorum, state: 'running' },
+          agentIds,
+        ),
+      { type: 'round-started', runId: run.runId, roundId, index, agentIds },
     )
-    this.persistEvent(run.runId, {
-      type: 'round-started',
-      runId: run.runId,
-      roundId,
-      index,
-      agentIds: panel.agents.map((a) => a.agentId),
-    })
 
     let invocations: InvocationRecord[]
     try {
@@ -204,8 +206,7 @@ export class Engine {
     } catch (err) {
       // Defensive: executeAgent is built never to throw, but if dispatch fails
       // catastrophically, never leave the round stuck `running`.
-      this.store.completeRound(roundId, 'failed')
-      this.persistEvent(run.runId, {
+      this.persistWith(run.runId, () => this.store.completeRound(roundId, 'failed'), {
         type: 'round-completed',
         runId: run.runId,
         roundId,
@@ -215,8 +216,12 @@ export class Engine {
     }
 
     const verdict = computeVerdict(invocations, panel.quorum)
-    this.store.completeRound(roundId, verdict)
-    this.persistEvent(run.runId, { type: 'round-completed', runId: run.runId, roundId, verdict })
+    this.persistWith(run.runId, () => this.store.completeRound(roundId, verdict), {
+      type: 'round-completed',
+      runId: run.runId,
+      roundId,
+      verdict,
+    })
 
     return {
       roundId,
@@ -273,18 +278,26 @@ export class Engine {
     prompt: string,
     options: DispatchOptions,
   ): Promise<InvocationRecord> {
-    this.store.upsertInvocation(roundId, placeholder(agent.agentId, 'running'))
     const maxAttempts = agent.maxRetries + 1
     let record = placeholder(agent.agentId, 'error')
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      this.persistEvent(run.runId, {
-        type: 'invocation-started',
-        runId: run.runId,
-        roundId,
-        agentId: agent.agentId,
-        attempt,
-      })
+      // Atomically mark the row `running` with the CURRENT attempt count + log
+      // the start, so a crash mid-attempt/backoff reconciles with the right
+      // attempt number.
+      this.persistWith(
+        run.runId,
+        () =>
+          this.store.upsertInvocation(roundId, {
+            agentId: agent.agentId,
+            status: 'running',
+            attempts: attempt,
+            distilled: '',
+            durationMs: 0,
+            truncated: false,
+          }),
+        { type: 'invocation-started', runId: run.runId, roundId, agentId: agent.agentId, attempt },
+      )
       try {
         record = await this.runOnce(run, roundId, agent, prompt, attempt, options)
       } catch (err) {
@@ -304,8 +317,7 @@ export class Engine {
       await this.sleep(this.backoff(attempt))
     }
 
-    this.store.upsertInvocation(roundId, record)
-    this.persistEvent(run.runId, {
+    this.persistWith(run.runId, () => this.store.upsertInvocation(roundId, record), {
       type: 'invocation-finished',
       runId: run.runId,
       roundId,
@@ -384,8 +396,13 @@ export class Engine {
     return exp + Math.floor(Math.random() * BACKOFF_BASE_MS)
   }
 
-  private persistEvent(runId: string, event: EngineEvent): void {
-    const seq = this.store.appendEvent(runId, JSON.stringify(event))
+  /**
+   * Atomically commit a state mutation AND its durable event in one transaction,
+   * THEN notify the live in-memory bus with the durable seq. A crash can never
+   * leave a state transition without its matching event (or vice versa).
+   */
+  private persistWith(runId: string, mutate: () => void, event: EngineEvent): void {
+    const seq = this.store.commitWithEvent(runId, JSON.stringify(event), mutate)
     this.bus.emit(event, seq)
   }
 }

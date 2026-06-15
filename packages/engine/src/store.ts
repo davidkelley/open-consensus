@@ -84,7 +84,8 @@ export class EngineStore {
           prompt TEXT NOT NULL,
           quorum INTEGER NOT NULL,
           state TEXT NOT NULL,
-          verdict TEXT
+          verdict TEXT,
+          FOREIGN KEY (runId) REFERENCES runs(runId) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS rounds_runId ON rounds(runId);
         CREATE TABLE IF NOT EXISTS invocations (
@@ -97,7 +98,8 @@ export class EngineStore {
           durationMs INTEGER NOT NULL,
           truncated INTEGER NOT NULL,
           rawRef TEXT,
-          PRIMARY KEY (roundId, agentId)
+          PRIMARY KEY (roundId, agentId),
+          FOREIGN KEY (roundId) REFERENCES rounds(roundId) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS events (
           seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,6 +194,21 @@ export class EngineStore {
     return Number(info.lastInsertRowid)
   }
 
+  /**
+   * Atomically apply a state mutation AND append its event to the durable log in
+   * one transaction, returning the event's durable seq. Guarantees the state
+   * tables and the event log never disagree after a crash (the engine emits to
+   * the in-memory bus only after this commits).
+   */
+  commitWithEvent(runId: string, payload: string, mutate: () => void): number {
+    let seq = 0
+    this.db.transaction(() => {
+      mutate()
+      seq = this.appendEvent(runId, payload)
+    })()
+    return seq
+  }
+
   // -- raw blobs ----------------------------------------------------------
 
   writeRaw(rawRef: string, data: Buffer): void {
@@ -225,6 +242,13 @@ export class EngineStore {
       | (RunRecord & { state: string })
       | undefined
     return row ? { ...row, state: row.state as RunState } : undefined
+  }
+
+  /** Durable events after `sinceSeq` (snapshot replay + daemon SSE backfill). */
+  readEvents(sinceSeq = 0, limit = 1000): { seq: number; runId: string | null; payload: string }[] {
+    return this.db
+      .prepare('SELECT seq, runId, payload FROM events WHERE seq > ? ORDER BY seq LIMIT ?')
+      .all(sinceSeq, limit) as { seq: number; runId: string | null; payload: string }[]
   }
 
   countRounds(runId: string): number {
@@ -339,18 +363,11 @@ export class EngineStore {
     // Delete rows first (committed atomically); then sweep the blobs. A crash
     // between leaves harmless orphan blobs, never dangling rows that point at
     // missing files.
-    const tx = this.db.transaction(() => {
-      const rounds = this.db.prepare('SELECT roundId FROM rounds WHERE runId = ?').all(runId) as {
-        roundId: string
-      }[]
-      for (const { roundId } of rounds) {
-        this.db.prepare('DELETE FROM invocations WHERE roundId = ?').run(roundId)
-      }
-      this.db.prepare('DELETE FROM rounds WHERE runId = ?').run(runId)
+    this.db.transaction(() => {
       this.db.prepare('DELETE FROM events WHERE runId = ?').run(runId)
+      // FK ON DELETE CASCADE removes the run's rounds and their invocations.
       this.db.prepare('DELETE FROM runs WHERE runId = ?').run(runId)
-    })
-    tx()
+    })()
     // Sweep EVERY raw blob for the run (incl. every retry attempt) by filename
     // prefix — not just the rawRefs still referenced by the final invocations.
     const prefix = `${runId.replace(/[^A-Za-z0-9._-]/g, '_')}.`
