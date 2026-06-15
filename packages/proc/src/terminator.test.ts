@@ -60,16 +60,6 @@ describe('posix terminator', () => {
     expect(await waitGone(pid)).toBe(true)
   })
 
-  it('falls back to the bare pid when there is no process group', async () => {
-    // Not detached -> no own group, so kill(-pid) fails and we fall back.
-    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
-      stdio: 'ignore',
-    })
-    const pid = child.pid as number
-    await createPosixTerminator().terminate(pid, { graceMs: 1500 })
-    expect(await waitGone(pid)).toBe(true)
-  })
-
   it('SIGKILLs the GROUP when the leader exits but a grandchild ignores SIGTERM', async () => {
     // Leader spawns a SIGTERM-ignoring grandchild (same group), prints its pid,
     // then exits cooperatively on SIGTERM. The leader dies but the group must

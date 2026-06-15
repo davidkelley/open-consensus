@@ -55,15 +55,18 @@ export interface AdapterInvocationContext {
   promptFile?: string
 }
 
-/** A runnable invocation. Mirrors the proc `ProcessSpec` plus prompt delivery. */
+/**
+ * A runnable invocation. Mirrors the proc `ProcessSpec` plus prompt delivery.
+ * For temp-file delivery the adapter references the *engine-allocated*
+ * `ctx.promptFile` path in `args` — it never returns a path, so a bad/malicious
+ * adapter can't redirect the engine's write to an arbitrary file.
+ */
 export interface AdapterInvocation {
   file: string
   args: string[]
   env: Record<string, string>
   /** Prompt delivered on stdin (preferred). */
   stdin?: string
-  /** Prompt written to this temp file by the engine; cleaned up after (D10). */
-  promptTempFile?: string
 }
 
 export type AdapterStatus = 'ok' | 'refusal' | 'error'

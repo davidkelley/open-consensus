@@ -86,6 +86,14 @@ describe('runProcess', () => {
     expect(rawSizes.length).toBeGreaterThan(0)
   })
 
+  it('detects overflow when a chunk exactly fills the cap and more follows', async () => {
+    // flood emits 64KiB chunks; a 64KiB cap fills exactly on chunk 1, so the
+    // overflow must be detected when chunk 2 arrives (the exact-fill path).
+    const r = await run('flood', { maxOutputBytes: 64 * 1024 })
+    expect(r.outcome).toBe('output-overflow')
+    expect(r.truncated).toBe(true)
+  })
+
   it('reports spawn-error for a missing executable', async () => {
     const r = await runProcess(
       { file: '/nonexistent/oc-bin-xyz' },

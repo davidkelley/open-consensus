@@ -141,8 +141,9 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
       killing = true
       void terminator.terminate(pid).catch(() => {})
       // Defensive: if an orphaned grandchild keeps our stdio pipes open, 'close'
-      // may never fire — resolve anyway after a bounded grace.
-      const fallback = setTimeout(() => finish(outcome, null, 'SIGKILL'), 8000)
+      // may never fire — resolve anyway after a bounded grace. signal is null
+      // because no OS close was observed (don't fabricate a SIGKILL signal).
+      const fallback = setTimeout(() => finish(outcome, null, null), 8000)
       fallback.unref()
       cleanups.push(() => clearTimeout(fallback))
     }
@@ -161,7 +162,13 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     const collect = (name: 'stdout' | 'stderr', chunk: Buffer): void => {
       options.onRaw?.(name, chunk)
       const s = streams[name]
-      if (s.bytes >= options.maxOutputBytes) return
+      if (s.bytes >= options.maxOutputBytes) {
+        // Already full and yet more data arrived -> genuine overflow (covers a
+        // chunk that exactly filled the cap, then another chunk follows).
+        truncated = true
+        requestKill('output-overflow')
+        return
+      }
       const remaining = options.maxOutputBytes - s.bytes
       if (chunk.length > remaining) {
         s.chunks.push(chunk.subarray(0, remaining))
@@ -186,13 +193,12 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     const timer = setTimeout(() => requestKill('timeout'), options.timeoutMs)
     cleanups.push(() => clearTimeout(timer))
 
+    // The signal is guaranteed not-yet-aborted here — the pre-spawn guard above
+    // already handled an already-aborted signal.
     const { signal } = options
     if (signal) {
-      if (signal.aborted) onAbort()
-      else {
-        signal.addEventListener('abort', onAbort, { once: true })
-        cleanups.push(() => signal.removeEventListener('abort', onAbort))
-      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      cleanups.push(() => signal.removeEventListener('abort', onAbort))
     }
   })
 }
