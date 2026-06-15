@@ -255,7 +255,7 @@ describe('Engine.dispatchRound', () => {
       durationMs: 0,
       truncated: false,
     })
-    expect(store.reconcile().repairedRounds).toContain(roundId)
+    expect(engine.reconcile().repairedRounds).toContain(roundId)
     const repaired = store.getRound(roundId)
     expect(repaired?.state).toBe('complete')
     expect(repaired?.invocations[0]?.status).toBe('interrupted')

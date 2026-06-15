@@ -131,6 +131,31 @@ export class EngineStore {
       .run(round.roundId, round.runId, round.index, round.prompt, round.quorum, round.state)
   }
 
+  /**
+   * Atomically start a round AND insert a `pending` row for every agent, so a
+   * crash mid-setup can never leave a `running` round with a partial agent set
+   * (which would make reconcile compute a verdict from missing agents).
+   */
+  startRoundWithPending(
+    round: Omit<RoundRecord, 'invocations' | 'verdict'>,
+    agentIds: readonly string[],
+  ): void {
+    const tx = this.db.transaction(() => {
+      this.startRound(round)
+      for (const agentId of agentIds) {
+        this.upsertInvocation(round.roundId, {
+          agentId,
+          status: 'pending',
+          attempts: 0,
+          distilled: '',
+          durationMs: 0,
+          truncated: false,
+        })
+      }
+    })
+    tx()
+  }
+
   upsertInvocation(roundId: string, inv: InvocationRecord): void {
     this.db
       .prepare(`
@@ -257,8 +282,35 @@ export class EngineStore {
    * Returns the round ids that were repaired.
    */
   reconcile(): { repairedRounds: string[] } {
+    // Startup-only repair: there are no live SSE subscribers yet, so we append
+    // the terminal transitions to the DURABLE log (not the in-memory EventBus) —
+    // a fresh daemon replays the log and sees a consistent terminal history.
     const repaired: string[] = []
     const tx = this.db.transaction(() => {
+      const insertEvent = this.db.prepare('INSERT INTO events (runId, payload) VALUES (?, ?)')
+      // Log an invocation-finished(interrupted) for every in-flight agent BEFORE
+      // flipping them, so the event log shows each agent reaching a terminal
+      // state rather than silently vanishing.
+      const interrupted = this.db
+        .prepare(
+          `SELECT i.roundId, i.agentId, i.attempts, r.runId FROM invocations i
+           JOIN rounds r ON r.roundId = i.roundId
+           WHERE i.status IN ('running', 'pending')`,
+        )
+        .all() as { roundId: string; agentId: string; attempts: number; runId: string }[]
+      for (const inv of interrupted) {
+        insertEvent.run(
+          inv.runId,
+          JSON.stringify({
+            type: 'invocation-finished',
+            runId: inv.runId,
+            roundId: inv.roundId,
+            agentId: inv.agentId,
+            status: 'interrupted',
+            attempts: inv.attempts,
+          }),
+        )
+      }
       this.db
         .prepare(
           "UPDATE invocations SET status = 'interrupted' WHERE status IN ('running', 'pending')",
@@ -267,7 +319,6 @@ export class EngineStore {
       const runningRounds = this.db
         .prepare("SELECT roundId, runId, quorum FROM rounds WHERE state = 'running'")
         .all() as { roundId: string; runId: string; quorum: number }[]
-      const insertEvent = this.db.prepare('INSERT INTO events (runId, payload) VALUES (?, ?)')
       for (const { roundId, runId, quorum } of runningRounds) {
         const round = this.getRound(roundId)
         if (!round) continue

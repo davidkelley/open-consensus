@@ -21,4 +21,18 @@ describe('distill', () => {
     expect(r.distilled).toContain('truncated:')
     expect(r.distilled).not.toContain('rawRef')
   })
+
+  it('does not corrupt a multi-byte codepoint split by the cap boundary', () => {
+    // 😀 is 4 bytes; a 5-byte cap lands mid-emoji, then 'END' follows.
+    const r = distill(`${'a'.repeat(20)}😀END`, 5)
+    expect(r.truncated).toBe(true)
+    expect(r.distilled).not.toContain('�')
+    expect(r.distilled).toContain('END')
+  })
+
+  it('handles a cap window of only continuation bytes (empty tail)', () => {
+    const r = distill('😀😀😀', 2)
+    expect(r.truncated).toBe(true)
+    expect(r.distilled).not.toContain('�')
+  })
 })

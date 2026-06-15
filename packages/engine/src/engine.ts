@@ -153,6 +153,15 @@ export class Engine {
     return this.bus
   }
 
+  /**
+   * Recover crashed in-flight state (D15). The daemon MUST call this on startup,
+   * before accepting work, so running/pending invocations are advanced to
+   * `interrupted` and any `running` round gets a recomputed terminal verdict.
+   */
+  reconcile(): { repairedRounds: string[] } {
+    return this.store.reconcile()
+  }
+
   createRun(panelId: string): RunRecord {
     const run: RunRecord = {
       runId: randomUUID(),
@@ -174,19 +183,13 @@ export class Engine {
   ): Promise<RoundRecord> {
     const roundId = randomUUID()
     const index = this.store.countRounds(run.runId)
-    this.store.startRound({
-      roundId,
-      runId: run.runId,
-      index,
-      prompt,
-      quorum: panel.quorum,
-      state: 'running',
-    })
-    // Persist a `pending` row for EVERY agent up front, so a crash mid-dispatch
-    // leaves rows that reconcile-on-start can advance to `interrupted` (D15).
-    for (const agent of panel.agents) {
-      this.store.upsertInvocation(roundId, placeholder(agent.agentId, 'pending'))
-    }
+    // Atomically start the round AND insert a `pending` row for EVERY agent, so
+    // a crash mid-setup never leaves a `running` round with a partial agent set
+    // that reconcile would mis-verdict (D15).
+    this.store.startRoundWithPending(
+      { roundId, runId: run.runId, index, prompt, quorum: panel.quorum, state: 'running' },
+      panel.agents.map((a) => a.agentId),
+    )
     this.persistEvent(run.runId, {
       type: 'round-started',
       runId: run.runId,
@@ -333,6 +336,7 @@ export class Engine {
       }
       const invocation = agent.adapter.buildInvocation(ctx)
       const rawChunks: Buffer[] = []
+      let rawBytes = 0
       const result = await runProcess(
         {
           file: invocation.file,
@@ -345,7 +349,14 @@ export class Engine {
           timeoutMs: agent.timeoutMs,
           maxOutputBytes: MAX_OUTPUT_BYTES,
           ...(options.signal ? { signal: options.signal } : {}),
-          onRaw: (_stream, chunk) => rawChunks.push(chunk),
+          // onRaw fires before the runner's own cap, so bound our accumulation
+          // too (chunks arriving before a tree-kill lands could exceed the cap).
+          onRaw: (_stream, chunk) => {
+            if (rawBytes < MAX_OUTPUT_BYTES) {
+              rawChunks.push(chunk)
+              rawBytes += chunk.length
+            }
+          },
         },
       )
       const parsed = agent.adapter.parse(result, ctx)
