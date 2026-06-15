@@ -1,12 +1,57 @@
 #!/usr/bin/env node
-// Thin entrypoint for the `open-consensus` binary. All logic lives in
-// `program.ts` (coverage-gated). The full slash-command TUI launcher arrives in
-// Stage 9; today this is the Stage-2 minimal config CLI.
+// Thin entrypoint for the `open-consensus` binary. All command logic lives in
+// `program.ts` (coverage-gated) over the stateless `command-core` library; this
+// file only wires the real, un-testable side effects — the detached daemon spawn
+// and the foreground `startDaemon` loop — and maps errors to exit codes.
+import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
+import { defaultRegistry } from '@open-consensus/adapters'
+import {
+  type ForegroundDaemon,
+  runDaemonForeground,
+  spawnDetachedDaemon,
+} from '@open-consensus/command-core'
+import { daemonDiscoveryPath, startDaemon } from '@open-consensus/daemon'
 import { CommanderError } from 'commander'
-import { run } from './program'
+import { resolveConfigFile, run } from './program'
 
-run(process.argv).catch((err: unknown) => {
-  // Commander already printed help/usage for its own errors.
+/** The daemon needs every real adapter; the unsandboxed opt-in was gated at config time. */
+const daemonRegistry = () => defaultRegistry({ includeUnsandboxed: true })
+
+/** Resolve when a shutdown signal arrives (the foreground `daemon serve` loop). */
+function waitForShutdown(): Promise<void> {
+  return new Promise((resolve) => {
+    const onSignal = () => resolve()
+    process.once('SIGTERM', onSignal)
+    process.once('SIGINT', onSignal)
+  })
+}
+
+async function serveDaemon(): Promise<void> {
+  await runDaemonForeground({
+    start: async (): Promise<ForegroundDaemon> => {
+      const daemon = await startDaemon({ adapters: daemonRegistry() })
+      return { endpoint: daemon.endpoint, stop: () => daemon.stop() }
+    },
+    onStarted: (endpoint) =>
+      process.stderr.write(`open-consensus daemon listening on ${endpoint}\n`),
+    waitForShutdown,
+  })
+}
+
+const cliEntry = fileURLToPath(import.meta.url)
+
+run(process.argv, {
+  configFile: resolveConfigFile(),
+  discoveryPath: daemonDiscoveryPath(),
+  registry: daemonRegistry(),
+  out: (line) => console.log(line),
+  err: (line) => process.stderr.write(`${line}\n`),
+  launchDaemon: () =>
+    spawnDetachedDaemon({ command: process.execPath, args: [cliEntry, 'daemon', 'serve'] }),
+  serveDaemon,
+  mcpHostPath: `${homedir()}/.claude.json`,
+}).catch((err: unknown) => {
   if (err instanceof CommanderError) {
     process.exitCode = err.exitCode
     return

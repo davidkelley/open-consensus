@@ -1,10 +1,15 @@
 {
-  "name": "@open-consensus/cli",
+  "name": "@open-consensus/command-core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "open-consensus": "./dist/cli.js"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "files": ["dist"],
   "scripts": {
@@ -14,11 +19,12 @@
   },
   "dependencies": {
     "@open-consensus/adapters": "*",
-    "@open-consensus/command-core": "*",
     "@open-consensus/config": "*",
     "@open-consensus/core": "*",
     "@open-consensus/daemon": "*",
-    "commander": "^12.1.0"
+    "@open-consensus/engine": "*",
+    "@open-consensus/proc": "*",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.1.8",

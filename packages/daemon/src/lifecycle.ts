@@ -68,6 +68,8 @@ export interface Discovery {
   endpoint: string
   /** Bearer token clients must present. */
   token: string
+  /** PID of the serve process, so `daemon stop` can signal it (Stage 8). */
+  pid?: number
 }
 
 /** Atomically (temp + rename) write the 0600 discovery file clients read. */
@@ -87,7 +89,11 @@ export function readDiscovery(path: string): Discovery | undefined {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Discovery>
     if (typeof parsed.endpoint === 'string' && typeof parsed.token === 'string') {
-      return { endpoint: parsed.endpoint, token: parsed.token }
+      return {
+        endpoint: parsed.endpoint,
+        token: parsed.token,
+        ...(typeof parsed.pid === 'number' ? { pid: parsed.pid } : {}),
+      }
     }
   } catch {
     /* missing / mid-rename / corrupt */

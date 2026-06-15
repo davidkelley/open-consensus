@@ -27,6 +27,11 @@ export class DaemonAlreadyRunningError extends Error {
   }
 }
 
+/** Canonical path to the daemon's discovery file (the CLI/TUI/MCP read this). */
+export function daemonDiscoveryPath(paths: AppPaths = appPaths()): string {
+  return join(paths.runtime, DISCOVERY_NAME)
+}
+
 export interface StartDaemonOptions {
   adapters: AdapterRegistry
   /** Override resolved app dirs (tests). */
@@ -120,7 +125,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
     server = new DaemonServer({ core, token })
     const target = chooseTarget(paths, opts.loopback ?? false)
     const endpoint = await server.listen(target)
-    writeDiscovery(discoveryPath, { endpoint, token })
+    // Record this process's PID so `open-consensus daemon stop` can signal the
+    // serve process directly (Stage 8); in-process test callers ignore it and
+    // use the returned `stop()` instead.
+    writeDiscovery(discoveryPath, { endpoint, token, pid: process.pid })
 
     const intervalMs = opts.reaperIntervalMs ?? DEFAULT_REAPER_INTERVAL_MS
     reaper = setInterval(() => core.reapIdle(), intervalMs)
