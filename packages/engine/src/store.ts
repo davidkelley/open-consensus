@@ -261,6 +261,16 @@ export class EngineStore {
     return { events: hasMore ? rows.slice(0, limit) : rows, hasMore }
   }
 
+  /** Highest durable event seq for a run — the snapshot `stateVersion` (D4/D11). */
+  latestSeq(runId: string): number {
+    const row = this.db
+      .prepare('SELECT MAX(seq) AS seq FROM events WHERE runId = ?')
+      .get(runId) as {
+      seq: number | null
+    }
+    return row.seq ?? 0
+  }
+
   countRounds(runId: string): number {
     return (
       this.db.prepare('SELECT COUNT(*) AS n FROM rounds WHERE runId = ?').get(runId) as {
@@ -305,6 +315,14 @@ export class EngineStore {
         ...(r.rawRef ? { rawRef: r.rawRef } : {}),
       })),
     }
+  }
+
+  /** The most recent round of a run (highest index) — used by `status` (D12). */
+  latestRound(runId: string): RoundRecord | undefined {
+    const row = this.db
+      .prepare('SELECT roundId FROM rounds WHERE runId = ? ORDER BY idx DESC LIMIT 1')
+      .get(runId) as { roundId: string } | undefined
+    return row ? this.getRound(row.roundId) : undefined
   }
 
   // -- reconcile (plan D15) ----------------------------------------------

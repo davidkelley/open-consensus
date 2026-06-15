@@ -86,6 +86,26 @@ describe('Engine.dispatchRound', () => {
     expect(store.getRound(round.roundId)?.verdict).toBe('met')
   })
 
+  it('honors a caller-provided roundId (async daemon tracking)', async () => {
+    const run = engine.createRun('p')
+    const round = await engine.dispatchRound(
+      run,
+      { panelId: 'p', quorum: 1, agents: [agent('a')] },
+      'x',
+      { roundId: 'fixed-round-id' },
+    )
+    expect(round.roundId).toBe('fixed-round-id')
+    expect(store.getRound('fixed-round-id')?.verdict).toBe('met')
+  })
+
+  it('abandons a run with a durable run-abandoned event', () => {
+    const run = engine.createRun('p')
+    engine.abandonRun(run.runId)
+    expect(store.getRun(run.runId)?.state).toBe('abandoned')
+    const types = store.readEvents().events.map((e) => JSON.parse(e.payload).type)
+    expect(types).toContain('run-abandoned')
+  })
+
   it('isolates failures and yields a degraded verdict', async () => {
     const run = engine.createRun('p')
     const round = await engine.dispatchRound(

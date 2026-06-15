@@ -41,6 +41,9 @@ export interface Panel {
 
 export interface DispatchOptions {
   signal?: AbortSignal
+  /** Pre-generated round id, so an async caller (the daemon) can track the round
+   * by id immediately rather than waiting for dispatchRound to resolve. */
+  roundId?: string
 }
 
 export interface EngineOptions {
@@ -162,6 +165,18 @@ export class Engine {
     return this.store.reconcile()
   }
 
+  /**
+   * Park an idle, orchestrator-orphaned run (D14). Persists the state flip AND a
+   * durable `run-abandoned` event in one transaction (via persistWith) so
+   * long-poll/SSE clients observe the parking. Called by the daemon's idle reaper.
+   */
+  abandonRun(runId: string): void {
+    this.persistWith(runId, () => this.store.setRunState(runId, 'abandoned'), {
+      type: 'run-abandoned',
+      runId,
+    })
+  }
+
   createRun(panelId: string): RunRecord {
     const run: RunRecord = {
       runId: randomUUID(),
@@ -184,7 +199,7 @@ export class Engine {
     prompt: string,
     options: DispatchOptions = {},
   ): Promise<RoundRecord> {
-    const roundId = randomUUID()
+    const roundId = options.roundId ?? randomUUID()
     const index = this.store.countRounds(run.runId)
     const agentIds = panel.agents.map((a) => a.agentId)
     // Atomically start the round, insert a `pending` row for EVERY agent, and log

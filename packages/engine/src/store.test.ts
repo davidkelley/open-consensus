@@ -121,6 +121,28 @@ describe('EngineStore', () => {
     expect(store.readRaw('run1.rd1.a.1').eof).toBe(true)
   })
 
+  it('reports the latest event seq and the latest round', () => {
+    store.createRun(run())
+    expect(store.latestSeq('run1')).toBe(0) // no events yet
+    expect(store.latestRound('run1')).toBeUndefined()
+    store.appendEvent('run1', '{"type":"x"}')
+    const last = store.appendEvent('run1', '{"type":"y"}')
+    expect(store.latestSeq('run1')).toBe(last)
+    expect(store.latestSeq('missing')).toBe(0)
+
+    startRound(store, 1, 'rd0')
+    store.startRound({
+      roundId: 'rd1',
+      runId: 'run1',
+      index: 1,
+      prompt: 'p',
+      quorum: 1,
+      state: 'running',
+    })
+    expect(store.latestRound('run1')?.roundId).toBe('rd1')
+    expect(store.latestRound('missing')).toBeUndefined()
+  })
+
   it('appends events with a monotonic sequence', () => {
     const s1 = store.appendEvent('run1', '{"type":"x"}')
     expect(store.appendEvent('run1', '{"type":"y"}')).toBe(s1 + 1)
