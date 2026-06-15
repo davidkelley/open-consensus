@@ -1,4 +1,5 @@
-import { timingSafeEqual } from 'node:crypto'
+import { createHash, timingSafeEqual } from 'node:crypto'
+import { chmodSync } from 'node:fs'
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http'
 import { formatZodError } from '@open-consensus/config'
 import type { z } from 'zod'
@@ -17,24 +18,39 @@ export interface DaemonServerOptions {
   pingMs?: number
 }
 
-/** Constant-time bearer-token comparison (avoids a timing oracle). */
+/**
+ * Constant-time bearer-token comparison. Hashing both sides to fixed-length
+ * digests makes the compare constant-time regardless of input length — so it
+ * leaks neither the value nor the length of the expected token.
+ */
 function tokenMatches(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
+  const a = createHash('sha256').update(provided).digest()
+  const b = createHash('sha256').update(expected).digest()
+  return timingSafeEqual(a, b)
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
     'content-type': 'application/json',
     'content-length': Buffer.byteLength(payload),
+    ...extraHeaders,
   })
   res.end(payload)
 }
 
-function sendError(res: ServerResponse, status: number, message: string): void {
-  sendJson(res, status, { error: message })
+function sendError(
+  res: ServerResponse,
+  status: number,
+  message: string,
+  extraHeaders?: Record<string, string>,
+): void {
+  sendJson(res, status, { error: message }, extraHeaders)
 }
 
 /** Read a request body up to `max` bytes; resolves `null` if it overflows. */
@@ -51,11 +67,14 @@ function readBody(req: IncomingMessage, max: number): Promise<Buffer | null> {
       }
     }
     req.on('data', (chunk: Buffer) => {
-      if (overflow) return // keep draining so the caller can still send a 413
+      if (overflow) return
       size += chunk.length
       if (size > max) {
         overflow = true
         finish(null)
+        // Stop consuming the body; the caller sends a 413 with `Connection:
+        // close`, so the socket is torn down rather than held by a slow client.
+        req.pause()
         return
       }
       chunks.push(chunk)
@@ -81,6 +100,8 @@ export class DaemonServer {
   private readonly pingMs: number
   /** Set once when bound to loopback: the exact `host:port` we require. */
   private expectedHost: string | undefined
+  /** True once `listen()` has bound, so `close()` won't hang on a dead server. */
+  private listening = false
   /** Open SSE connections, closed on shutdown. */
   private readonly sseClients = new Set<ServerResponse>()
 
@@ -103,12 +124,18 @@ export class DaemonServer {
       this.http.once('error', reject)
       const onListening = () => {
         this.http.removeListener('error', reject)
+        this.listening = true
         if ('socketPath' in target) {
+          // Force 0600 on the socket file itself (umask-independent); the runtime
+          // dir is already 0700, but the socket must not depend on the umask.
+          chmodSync(target.socketPath, 0o600)
           resolve(target.socketPath)
           return
         }
         const addr = this.http.address()
         const port = typeof addr === 'object' && addr ? addr.port : target.port
+        // Set the expected Host BEFORE resolving so a request can never be
+        // handled with Host/Origin validation disabled.
         this.expectedHost = `${target.host}:${port}`
         resolve(`http://${this.expectedHost}`)
       }
@@ -120,6 +147,10 @@ export class DaemonServer {
   close(): Promise<void> {
     for (const res of this.sseClients) res.end()
     this.sseClients.clear()
+    // A server that never bound (startup rolled back) has no close callback —
+    // returning here keeps the rollback from awaiting forever.
+    if (!this.listening) return Promise.resolve()
+    this.listening = false
     return new Promise((resolve) => {
       this.http.close(() => resolve())
       // Force-close lingering sockets (idle keep-alive + any open SSE) so the
@@ -213,7 +244,7 @@ export class DaemonServer {
       const url = new URL(req.url ?? '/', 'http://localhost')
       const waitMs = clampWaitMs(url.searchParams.get('wait_ms'), Number.POSITIVE_INFINITY)
       const snapshot = await this.core.waitRound(runId, roundId, waitMs)
-      return sendJson(res, 200, snapshot)
+      return snapshot ? sendJson(res, 200, snapshot) : sendError(res, 404, 'unknown round')
     }
     // /runs/:id/rounds/:roundId/cancel
     if (seg.length === 5 && seg[2] === 'rounds' && seg[4] === 'cancel' && method === 'POST') {
@@ -250,7 +281,7 @@ export class DaemonServer {
   ): Promise<T | null> {
     const raw = await readBody(req, this.maxBodyBytes)
     if (raw === null) {
-      sendError(res, 413, 'request body too large')
+      sendError(res, 413, 'request body too large', { connection: 'close' })
       return null
     }
     let json: unknown
@@ -295,6 +326,7 @@ export class DaemonServer {
     // overlap with the (synchronous, never-interleaved) backfill below.
     let highWater = lastEventId
     const unsubscribe = this.core.subscribe((event, seq) => {
+      this.core.touch(event.runId) // SSE activity resets the run's idle TTL (D14)
       if (seq > highWater) writeRaw(seq, JSON.stringify(event))
     })
 

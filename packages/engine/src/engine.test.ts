@@ -106,6 +106,22 @@ describe('Engine.dispatchRound', () => {
     expect(types).toContain('run-abandoned')
   })
 
+  it('redacts secrets from distilled text and raw blobs before persisting (D10)', async () => {
+    const run = engine.createRun('p')
+    const secret = `sk-ant-${'A'.repeat(24)}`
+    const round = await engine.dispatchRound(
+      run,
+      { panelId: 'p', quorum: 1, agents: [agent('a')] },
+      `my key is ${secret}`,
+    )
+    const inv = round.invocations[0]
+    expect(inv?.distilled).toContain('[REDACTED]')
+    expect(inv?.distilled).not.toContain(secret)
+    const raw = store.readRaw(inv?.rawRef as string)
+    expect(raw.chunk).not.toContain(secret)
+    expect(raw.chunk).toContain('[REDACTED]')
+  })
+
   it('isolates failures and yields a degraded verdict', async () => {
     const run = engine.createRun('p')
     const round = await engine.dispatchRound(

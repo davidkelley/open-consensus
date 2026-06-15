@@ -118,13 +118,20 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
         await boundServer.close()
         boundStore.close()
         rmSync(discoveryPath, { force: true })
+        // Remove the unix socket file (a no-op for a loopback endpoint) so a
+        // stale node never lingers on disk after a clean shutdown.
+        if (!endpoint.startsWith('http://')) rmSync(endpoint, { force: true })
         releaseLock(lockPath, lockInfo)
       },
     }
   } catch (err) {
     // Roll back partial startup so the lock never strands a half-initialized daemon.
     if (reaper) clearInterval(reaper)
-    if (server) await server.close()
+    try {
+      if (server) await server.close()
+    } catch {
+      /* best-effort: never let cleanup mask the original startup error */
+    }
     store?.close()
     rmSync(discoveryPath, { force: true })
     releaseLock(lockPath, lockInfo)
@@ -151,19 +158,21 @@ function chooseTarget(paths: AppPaths, forceLoopback: boolean): ListenTarget {
  */
 export async function waitForReady(
   discovery: Discovery,
-  opts: { attempts?: number; intervalMs?: number } = {},
+  opts: { attempts?: number; intervalMs?: number; requestTimeoutMs?: number } = {},
 ): Promise<boolean> {
   const attempts = opts.attempts ?? 50
   const intervalMs = opts.intervalMs ?? 100
+  const requestTimeoutMs = opts.requestTimeoutMs ?? 2000
   for (let i = 0; i < attempts; i++) {
     try {
       const res = await daemonRequest(discovery.endpoint, discovery.token, {
         method: 'GET',
         path: '/health',
+        timeoutMs: requestTimeoutMs,
       })
       if (res.status === 200) return true
     } catch {
-      /* not up yet */
+      /* not up yet (connection refused, or a half-open endpoint timed out) */
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }

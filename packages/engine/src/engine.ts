@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Adapter, AdapterInvocationContext } from '@open-consensus/adapters'
+import { redactString } from '@open-consensus/core'
 import { type RunOutcome, runProcess } from '@open-consensus/proc'
 import { DEFAULT_DISTILL_CAP_BYTES, distill } from './distill'
 import { type EngineEvent, EventBus } from './events'
@@ -323,7 +324,9 @@ export class Engine {
           status: 'error',
           attempts: attempt,
           distilled: '',
-          errorClass: `engine-error: ${err instanceof Error ? err.message : String(err)}`,
+          errorClass: redactString(
+            `engine-error: ${err instanceof Error ? err.message : String(err)}`,
+          ),
           durationMs: 0,
           truncated: false,
         }
@@ -389,14 +392,17 @@ export class Engine {
       const parsed = agent.adapter.parse(result, ctx)
       const status = mapStatus(result.outcome, parsed.status)
       const rawRef = `${run.runId}.${roundId}.${agent.agentId}.${attempt}`
-      this.store.writeRaw(rawRef, Buffer.concat(rawChunks))
-      const { distilled, truncated } = distill(parsed.text, this.distillCap, rawRef)
+      // Redact secrets BEFORE persistence (D10): the raw blob, the distilled
+      // answer, and the error class. Unredacted raw capture is not offered in v1.
+      const rawText = redactString(Buffer.concat(rawChunks).toString('utf8'))
+      this.store.writeRaw(rawRef, Buffer.from(rawText, 'utf8'))
+      const { distilled, truncated } = distill(redactString(parsed.text), this.distillCap, rawRef)
       return {
         agentId: agent.agentId,
         status,
         attempts: attempt,
         distilled,
-        ...(parsed.errorClass ? { errorClass: parsed.errorClass } : {}),
+        ...(parsed.errorClass ? { errorClass: redactString(parsed.errorClass) } : {}),
         durationMs: result.durationMs,
         truncated,
         rawRef,

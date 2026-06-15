@@ -38,6 +38,12 @@ function makeCore(opts: { now?: () => number; idleTtlMs?: number } = {}) {
   return { core, store, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
+/** Assert a value is defined (waitRound returns undefined only for a bad round). */
+function must<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('expected a defined snapshot')
+  return value
+}
+
 describe('DaemonCore runs', () => {
   let h: ReturnType<typeof makeCore>
   beforeEach(() => {
@@ -53,11 +59,20 @@ describe('DaemonCore runs', () => {
     const started = h.core.startRun('p-ok', 'review this')
     expect('runId' in started).toBe(true)
     if (!('runId' in started)) return
-    const snap = await h.core.waitRound(started.runId, started.roundId, 5000)
+    const snap = must(await h.core.waitRound(started.runId, started.roundId, 5000))
     expect(snap.done).toBe(true)
     expect(snap.round?.verdict).toBe('met')
     expect(snap.round?.invocations[0]).toMatchObject({ agentId: 'a-ok', status: 'ok' })
     expect(snap.stateVersion).toBeGreaterThan(0)
+  })
+
+  it('returns undefined for an unknown round or a run/round mismatch', async () => {
+    const started = h.core.startRun('p-ok', 'x')
+    if (!('runId' in started)) throw new Error('start failed')
+    await h.core.drain()
+    expect(await h.core.waitRound(started.runId, 'no-such-round')).toBeUndefined()
+    // Right round, wrong run — must not leak the round under the wrong owner.
+    expect(await h.core.waitRound('some-other-run', started.roundId)).toBeUndefined()
   })
 
   it('rejects an unknown panel and a panel with no resolvable agents', () => {
@@ -74,7 +89,7 @@ describe('DaemonCore runs', () => {
     const next = h.core.startRound(started.runId, 'round two')
     expect('roundId' in next).toBe(true)
     if (!('roundId' in next)) return
-    const snap = await h.core.waitRound(started.runId, next.roundId, 5000)
+    const snap = must(await h.core.waitRound(started.runId, next.roundId, 5000))
     expect(snap.done).toBe(true)
     expect(snap.round?.index).toBe(1)
   })
@@ -103,7 +118,7 @@ describe('DaemonCore runs', () => {
     const started = h.core.startRun('p-ok', 'x')
     if (!('runId' in started)) throw new Error('start failed')
     await h.core.drain()
-    const snap = await h.core.waitRound(started.runId, started.roundId)
+    const snap = must(await h.core.waitRound(started.runId, started.roundId))
     expect(snap.done).toBe(true)
   })
 
@@ -119,7 +134,7 @@ describe('DaemonCore runs', () => {
   it('reads raw output by ref', async () => {
     const started = h.core.startRun('p-ok', 'hello')
     if (!('runId' in started)) throw new Error('start failed')
-    const snap = await h.core.waitRound(started.runId, started.roundId, 5000)
+    const snap = must(await h.core.waitRound(started.runId, started.roundId, 5000))
     const ref = snap.round?.invocations[0]?.rawRef
     expect(ref).toBeDefined()
     const raw = h.core.readRaw(ref as string)
@@ -142,7 +157,7 @@ describe('DaemonCore cancellation', () => {
     const started = h.core.startRun('p-slow', 'long task')
     if (!('runId' in started)) throw new Error('start failed')
     expect(h.core.cancelRun(started.runId)).toEqual({ cancelled: 1 })
-    const snap = await h.core.waitRound(started.runId, started.roundId, 5000)
+    const snap = must(await h.core.waitRound(started.runId, started.roundId, 5000))
     expect(snap.round?.invocations[0]?.status).toBe('cancelled')
     expect(snap.round?.verdict).toBe('failed')
   })

@@ -97,6 +97,10 @@ export class DaemonCore {
   }
 
   readRaw(ref: string, cursor?: number, maxBytes?: number) {
+    // A rawRef is `runId.roundId.agentId.attempt`; touching the run resets its
+    // idle TTL so `consensus_get_raw` counts as activity (D12).
+    const runId = ref.split('.')[0]
+    if (runId) this.touch(runId)
     return this.store.readRaw(ref, cursor, maxBytes)
   }
 
@@ -158,11 +162,18 @@ export class DaemonCore {
 
   /**
    * Snapshot long-poll (D4): resolves the instant the round goes terminal, else
-   * after `waitMs` (capped to the daemon ceiling). Idempotent and safe to repeat;
-   * a round that is not in-flight (already terminal, or from a prior daemon life)
-   * returns its current snapshot immediately.
+   * after `waitMs` (capped to the daemon ceiling). Idempotent and safe to repeat.
+   * Returns `undefined` when the round does not exist or does not belong to
+   * `runId` (the server maps that to 404, so a bad id can't drive a busy-wait
+   * loop). A terminal round not in-flight returns its snapshot immediately.
    */
-  async waitRound(runId: string, roundId: string, waitMs?: number): Promise<RoundSnapshot> {
+  async waitRound(
+    runId: string,
+    roundId: string,
+    waitMs?: number,
+  ): Promise<RoundSnapshot | undefined> {
+    const existing = this.store.getRound(roundId)
+    if (!existing || existing.runId !== runId) return undefined
     this.touch(runId)
     const inflight = this.inflight.get(roundId)
     if (inflight) {
@@ -190,6 +201,7 @@ export class DaemonCore {
 
   /** Cancel every in-flight round of a run (tree-kills their children) (D19). */
   cancelRun(runId: string): { cancelled: number } {
+    this.touch(runId) // cancellation is activity — don't let the reaper race it
     let cancelled = 0
     for (const inflight of this.inflight.values()) {
       if (inflight.runId === runId) {
@@ -204,6 +216,7 @@ export class DaemonCore {
   cancelRound(roundId: string): { cancelled: boolean } {
     const inflight = this.inflight.get(roundId)
     if (!inflight) return { cancelled: false }
+    this.touch(inflight.runId)
     inflight.abort.abort()
     return { cancelled: true }
   }
@@ -243,7 +256,9 @@ export class DaemonCore {
   reapIdle(): string[] {
     const now = this.now()
     const parked: string[] = []
+    const running = new Set<string>()
     for (const run of this.store.listRuns('running')) {
+      running.add(run.runId)
       if (this.hasInflight(run.runId)) {
         this.lastTouched.set(run.runId, now) // active -> reset clock
         continue
@@ -259,6 +274,11 @@ export class DaemonCore {
         this.lastTouched.delete(run.runId)
         parked.push(run.runId)
       }
+    }
+    // Bound the map: drop clocks for runs no longer in the running set (parked
+    // elsewhere, or pruned), so a long-lived daemon never accumulates entries.
+    for (const runId of this.lastTouched.keys()) {
+      if (!running.has(runId)) this.lastTouched.delete(runId)
     }
     return parked
   }

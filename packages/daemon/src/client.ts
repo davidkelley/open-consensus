@@ -6,6 +6,12 @@ export interface DaemonRequest {
   /** JSON body (POST). */
   body?: unknown
   headers?: Record<string, string>
+  /**
+   * Abort + reject after this many ms if the daemon accepts the connection but
+   * never responds (keeps a health-poll bounded). Omit for an open-ended call
+   * such as a long-poll, which legitimately blocks up to the server's wait_ms.
+   */
+  timeoutMs?: number
 }
 
 export interface DaemonResponse {
@@ -54,6 +60,11 @@ export function daemonRequest(
       )
     })
     clientReq.on('error', reject)
+    if (req.timeoutMs !== undefined) {
+      clientReq.setTimeout(req.timeoutMs, () => {
+        clientReq.destroy(new Error(`daemon request timed out after ${req.timeoutMs}ms`))
+      })
+    }
     if (payload !== undefined) clientReq.write(payload)
     clientReq.end()
   })

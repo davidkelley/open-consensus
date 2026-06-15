@@ -285,6 +285,26 @@ describe('DaemonServer over loopback', () => {
     ).toBe(404)
   })
 
+  it('404s a poll for an unknown round or a run/round mismatch', async () => {
+    const start = json(
+      await daemonRequest(endpoint, TOKEN, {
+        method: 'POST',
+        path: '/runs',
+        body: { panel: 'p-ok', prompt: 'x' },
+      }),
+    )
+    const unknownRound = await daemonRequest(endpoint, TOKEN, {
+      method: 'GET',
+      path: `/runs/${start.runId}/rounds/bogus`,
+    })
+    expect(unknownRound.status).toBe(404)
+    const mismatch = await daemonRequest(endpoint, TOKEN, {
+      method: 'GET',
+      path: `/runs/other-run/rounds/${start.roundId}`,
+    })
+    expect(mismatch.status).toBe(404)
+  })
+
   it('streams live events and backfills from Last-Event-ID', async () => {
     // Live: subscribe, then start a run and watch its events arrive.
     const live = openEvents(endpoint)
