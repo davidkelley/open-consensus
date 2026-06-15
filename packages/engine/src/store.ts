@@ -271,11 +271,27 @@ export class EngineStore {
       | undefined
   }
 
-  /** Record a key -> (run, round) mapping. First writer wins (OR IGNORE). */
-  recordIdempotent(key: string, runId: string, roundId: string): void {
-    this.db
-      .prepare('INSERT OR IGNORE INTO idempotency (key, runId, roundId) VALUES (?, ?, ?)')
-      .run(key, runId, roundId)
+  /**
+   * Atomically claim a key for (runId, roundId) and return the WINNING mapping —
+   * the existing one if a concurrent writer beat us, ours otherwise. The INSERT +
+   * read run in one transaction with the key as PRIMARY KEY, so exactly one
+   * mapping wins even under concurrency (the caller compares and discards a losing
+   * just-created run). FK-valid because the run row already exists at call time.
+   */
+  reserveIdempotent(
+    key: string,
+    runId: string,
+    roundId: string,
+  ): { runId: string; roundId: string } {
+    return this.db.transaction(() => {
+      this.db
+        .prepare('INSERT OR IGNORE INTO idempotency (key, runId, roundId) VALUES (?, ?, ?)')
+        .run(key, runId, roundId)
+      return this.db.prepare('SELECT runId, roundId FROM idempotency WHERE key = ?').get(key) as {
+        runId: string
+        roundId: string
+      }
+    })()
   }
 
   // -- raw blobs ----------------------------------------------------------

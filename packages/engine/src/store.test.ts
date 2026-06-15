@@ -155,12 +155,16 @@ describe('EngineStore', () => {
     expect(store.latestRound('missing')).toBeUndefined()
   })
 
-  it('records idempotency keys, dedups replays, and prunes them with the run', () => {
+  it('reserves idempotency keys atomically, returns the winner, and prunes with the run', () => {
     store.createRun(run())
     startRound(store)
     expect(store.getIdempotent('k1')).toBeUndefined()
-    store.recordIdempotent('k1', 'run1', 'rd1')
-    store.recordIdempotent('k1', 'run1', 'other') // first writer wins
+    expect(store.reserveIdempotent('k1', 'run1', 'rd1')).toEqual({ runId: 'run1', roundId: 'rd1' })
+    // A second reserve of the same key returns the ORIGINAL winner, not the new ids.
+    expect(store.reserveIdempotent('k1', 'run1', 'other')).toEqual({
+      runId: 'run1',
+      roundId: 'rd1',
+    })
     expect(store.getIdempotent('k1')).toEqual({ runId: 'run1', roundId: 'rd1' })
     // FK ON DELETE CASCADE: pruning the run drops its idempotency rows too (D16).
     store.pruneRun('run1')
@@ -171,7 +175,7 @@ describe('EngineStore', () => {
     const dbPath = join(dir, 'older.sqlite')
     const s1 = new EngineStore({ dbPath, rawDir: join(dir, 'rawo') })
     s1.createRun(run('r'))
-    s1.recordIdempotent('k', 'r', 'rd') // requires the v3 idempotency table
+    s1.reserveIdempotent('k', 'r', 'rd') // requires the v3 idempotency table
     s1.close()
     const s2 = new EngineStore({ dbPath, rawDir: join(dir, 'rawo') })
     expect(s2.getIdempotent('k')).toEqual({ runId: 'r', roundId: 'rd' })

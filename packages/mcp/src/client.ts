@@ -53,6 +53,10 @@ export interface DaemonClient {
   getRaw(rawRef: string, cursor?: number, maxBytes?: number): Promise<RawPage>
 }
 
+/** Cap a forwarded error string so an unexpected (e.g. proxy) body can't dump an
+ * unbounded blob into the orchestrator's context. */
+const MAX_ERROR_CHARS = 500
+
 function parse<T>(res: DaemonResponse): T {
   if (res.status < 200 || res.status >= 300) {
     let message = res.body
@@ -61,7 +65,7 @@ function parse<T>(res: DaemonResponse): T {
     } catch {
       /* non-JSON error body */
     }
-    throw new DaemonError(res.status, message)
+    throw new DaemonError(res.status, message.slice(0, MAX_ERROR_CHARS))
   }
   return JSON.parse(res.body) as T
 }

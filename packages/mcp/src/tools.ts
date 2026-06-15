@@ -73,15 +73,16 @@ export function shapeRound(snapshot: RoundSnapshot): Record<string, unknown> {
   }
 }
 
-/** A connection error is transient (D4): the run keeps progressing in the daemon;
- * the orchestrator should simply re-poll the same runId/roundId. */
+/** A connection error on a poll (a GET) is transient (D4): the run keeps
+ * progressing in the daemon; the orchestrator should re-poll the same
+ * runId/roundId. (EPIPE is deliberately excluded — it is ambiguous on the
+ * request-send path and a poll carries no body to fail mid-write.) */
 function isTransport(err: unknown): boolean {
   const code = (err as { code?: string } | undefined)?.code
   return (
     code === 'ECONNREFUSED' ||
     code === 'ECONNRESET' ||
     code === 'ENOENT' ||
-    code === 'EPIPE' ||
     (err instanceof Error && /timed out/.test(err.message))
   )
 }

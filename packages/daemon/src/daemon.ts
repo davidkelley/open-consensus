@@ -151,21 +151,28 @@ export class DaemonCore {
     prompt: string,
     idempotencyKey?: string,
   ): { runId: string; roundId: string } | { error: string } {
-    // Durable dedup (D12): a replayed call with the same key returns the original
-    // run/round (a still-in-flight one is fine — the caller just polls it).
-    if (idempotencyKey) {
-      const existing = this.store.getIdempotent(idempotencyKey)
-      if (existing && this.store.getRun(existing.runId)) {
-        this.touch(existing.runId)
-        return { runId: existing.runId, roundId: existing.roundId }
-      }
-    }
     const panel = resolvePanel(this.config, this.adapters, panelId)
     if (!panel) return { error: `unknown panel '${panelId}'` }
     if (panel.agents.length === 0) return { error: `panel '${panelId}' has no resolvable agents` }
+    // Durable dedup (D12), scoped to (panel, key) so the same key for a different
+    // panel can't return an unrelated run. A replayed call returns the original
+    // run/round; the FK guarantees that mapping still references a live run.
+    if (idempotencyKey) {
+      const key = `start:${panelId}:${idempotencyKey}`
+      const existing = this.store.getIdempotent(key)
+      if (existing) {
+        this.touch(existing.runId)
+        return existing
+      }
+      const run = this.engine.createRun(panelId)
+      const roundId = this.beginRound(run, panel, prompt)
+      const winner = this.store.reserveIdempotent(key, run.runId, roundId)
+      // winner !== ours only if a concurrent caller raced us (cannot happen on a
+      // single-instance, single-threaded daemon) — return the canonical mapping.
+      return winner
+    }
     const run = this.engine.createRun(panelId)
     const roundId = this.beginRound(run, panel, prompt)
-    if (idempotencyKey) this.store.recordIdempotent(idempotencyKey, run.runId, roundId)
     return { runId: run.runId, roundId }
   }
 
@@ -177,18 +184,21 @@ export class DaemonCore {
     const run = this.store.getRun(runId)
     if (!run) return { error: `unknown run '${runId}'` }
     if (run.state !== 'running') return { error: `run '${runId}' is ${run.state}` }
-    // Dedup scoped to (runId, key) — a replayed round returns the original (D12).
+    const panel = resolvePanel(this.config, this.adapters, run.panelId)
+    if (!panel) return { error: `panel '${run.panelId}' is no longer resolvable` }
+    // Dedup scoped to (runId, key) — the runId is in the storage key, so a key is
+    // structurally bound to its run and never collides with a start key (D12).
     if (idempotencyKey) {
-      const existing = this.store.getIdempotent(idempotencyKey)
-      if (existing && existing.runId === runId) {
+      const key = `round:${runId}:${idempotencyKey}`
+      const existing = this.store.getIdempotent(key)
+      if (existing) {
         this.touch(runId)
         return { roundId: existing.roundId }
       }
+      const roundId = this.beginRound(run, panel, prompt)
+      return { roundId: this.store.reserveIdempotent(key, runId, roundId).roundId }
     }
-    const panel = resolvePanel(this.config, this.adapters, run.panelId)
-    if (!panel) return { error: `panel '${run.panelId}' is no longer resolvable` }
     const roundId = this.beginRound(run, panel, prompt)
-    if (idempotencyKey) this.store.recordIdempotent(idempotencyKey, runId, roundId)
     return { roundId }
   }
 
