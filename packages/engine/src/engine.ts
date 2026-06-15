@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { Adapter, AdapterInvocationContext } from '@open-consensus/adapters'
 import { type RunOutcome, runProcess } from '@open-consensus/proc'
 import { DEFAULT_DISTILL_CAP_BYTES, distill } from './distill'
-import { EventBus } from './events'
+import { type EngineEvent, EventBus } from './events'
 import {
   type InvocationRecord,
   type InvocationStatus,
@@ -17,6 +17,8 @@ import type { EngineStore } from './store'
 
 const MAX_OUTPUT_BYTES = 1_000_000
 const BACKOFF_BASE_MS = 100
+const MAX_BACKOFF_MS = 30_000
+const DEFAULT_GLOBAL_CONCURRENCY = 8
 
 /** A resolved panel agent (config + its adapter instance). */
 export interface PanelAgent {
@@ -32,7 +34,7 @@ export interface PanelAgent {
 export interface Panel {
   panelId: string
   quorum: number
-  /** Max concurrent invocations in this panel's round (default = agent count). */
+  /** Per-round concurrency cap (in addition to the engine-global cap). */
   concurrency?: number
   agents: PanelAgent[]
 }
@@ -44,10 +46,37 @@ export interface DispatchOptions {
 export interface EngineOptions {
   store: EngineStore
   bus?: EventBus
+  /** Engine-global concurrency cap across ALL concurrent rounds (default 8). */
+  concurrency?: number
   distillCap?: number
   now?: () => number
   /** Backoff sleep — tests inject an instant resolver. */
   sleep?: (ms: number) => Promise<void>
+}
+
+/** A small async counting semaphore (FIFO waiters). */
+class Semaphore {
+  private active = 0
+  private readonly waiters: Array<() => void> = []
+  constructor(private readonly limit: number) {}
+
+  acquire(): Promise<void> {
+    if (this.active < this.limit) {
+      this.active++
+      return Promise.resolve()
+    }
+    return new Promise((resolve) => {
+      this.waiters.push(() => {
+        this.active++
+        resolve()
+      })
+    })
+  }
+
+  release(): void {
+    this.active--
+    this.waiters.shift()?.()
+  }
 }
 
 /** Map runner outcome + adapter status to a terminal invocation status. */
@@ -74,6 +103,10 @@ function isRetriable(status: InvocationStatus): boolean {
   return status === 'timeout' || status === 'error'
 }
 
+function placeholder(agentId: string, status: InvocationStatus): InvocationRecord {
+  return { agentId, status, attempts: 0, distilled: '', durationMs: 0, truncated: false }
+}
+
 /**
  * Compose the child env (the runner drops the inherited env, so the engine MUST
  * supply a usable one — Stage 3 contract). Allowlist a sanitized PATH + a few
@@ -90,9 +123,10 @@ function composeEnv(agentEnv?: Record<string, string>): Record<string, string> {
 
 /**
  * The consensus execution engine (plan D3/D13/D16). Fans a round out to every
- * panel agent — bounded concurrency, per-tool serialization, per-agent timeout,
- * bounded retries with backoff, failure isolation — then computes the quorum
- * verdict once every agent is terminal. Persists metadata + events + raw blobs.
+ * panel agent — engine-global bounded concurrency, per-tool serialization,
+ * per-agent timeout, bounded retries with backoff, failure isolation — then
+ * computes the quorum verdict once every agent is terminal. Persists metadata +
+ * a durable event log + raw blobs, with crash-consistent reconcile (D15).
  */
 export class Engine {
   private readonly store: EngineStore
@@ -100,6 +134,10 @@ export class Engine {
   private readonly distillCap: number
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
+  /** Engine-global concurrency cap, shared across concurrent dispatchRound calls. */
+  private readonly globalSem: Semaphore
+  /** Engine-global per-adapter serialization chains (span concurrent rounds). */
+  private readonly chains = new Map<string, Promise<unknown>>()
 
   constructor(options: EngineOptions) {
     this.store = options.store
@@ -108,6 +146,7 @@ export class Engine {
     this.now = options.now ?? (() => Date.now())
     this.sleep =
       options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+    this.globalSem = new Semaphore(Math.max(1, options.concurrency ?? DEFAULT_GLOBAL_CONCURRENCY))
   }
 
   get events(): EventBus {
@@ -143,6 +182,11 @@ export class Engine {
       quorum: panel.quorum,
       state: 'running',
     })
+    // Persist a `pending` row for EVERY agent up front, so a crash mid-dispatch
+    // leaves rows that reconcile-on-start can advance to `interrupted` (D15).
+    for (const agent of panel.agents) {
+      this.store.upsertInvocation(roundId, placeholder(agent.agentId, 'pending'))
+    }
     this.persistEvent(run.runId, {
       type: 'round-started',
       runId: run.runId,
@@ -151,7 +195,21 @@ export class Engine {
       agentIds: panel.agents.map((a) => a.agentId),
     })
 
-    const invocations = await this.dispatchAgents(run, roundId, panel, prompt, options)
+    let invocations: InvocationRecord[]
+    try {
+      invocations = await this.dispatchAgents(run, roundId, panel, prompt, options)
+    } catch (err) {
+      // Defensive: executeAgent is built never to throw, but if dispatch fails
+      // catastrophically, never leave the round stuck `running`.
+      this.store.completeRound(roundId, 'failed')
+      this.persistEvent(run.runId, {
+        type: 'round-completed',
+        runId: run.runId,
+        roundId,
+        verdict: 'failed',
+      })
+      throw err
+    }
 
     const verdict = computeVerdict(invocations, panel.quorum)
     this.store.completeRound(roundId, verdict)
@@ -169,50 +227,33 @@ export class Engine {
     }
   }
 
-  private async dispatchAgents(
+  private dispatchAgents(
     run: RunRecord,
     roundId: string,
     panel: Panel,
     prompt: string,
     options: DispatchOptions,
   ): Promise<InvocationRecord[]> {
-    const limit = panel.concurrency ?? panel.agents.length
-    let active = 0
-    const waiters: Array<() => void> = []
-    const acquire = (): Promise<void> =>
-      new Promise((resolve) => {
-        if (active < limit) {
-          active++
-          resolve()
-        } else {
-          waiters.push(() => {
-            active++
-            resolve()
-          })
-        }
-      })
-    const release = (): void => {
-      active--
-      waiters.shift()?.()
-    }
+    const roundSem = new Semaphore(Math.max(1, panel.concurrency ?? panel.agents.length))
 
-    // Per-tool serialization: chain invocations of the SAME adapter id so they
-    // never race on shared CLI state (~/.claude etc.); different tools run in
-    // parallel up to the global concurrency cap (D16).
-    const chains = new Map<string, Promise<unknown>>()
+    // Per-tool serialization: chain invocations of the SAME adapter id (engine-
+    // global, so concurrent rounds also serialize same-tool work and never race
+    // on shared CLI state). Acquire BOTH the global and per-round caps.
     const schedule = (agent: PanelAgent): Promise<InvocationRecord> => {
-      const prev = chains.get(agent.adapter.id) ?? Promise.resolve()
+      const prev = this.chains.get(agent.adapter.id) ?? Promise.resolve()
       const task = prev
         .catch(() => {})
         .then(async () => {
-          await acquire()
+          await this.globalSem.acquire()
+          await roundSem.acquire()
           try {
             return await this.executeAgent(run, roundId, agent, prompt, options)
           } finally {
-            release()
+            roundSem.release()
+            this.globalSem.release()
           }
         })
-      chains.set(
+      this.chains.set(
         agent.adapter.id,
         task.catch(() => {}),
       )
@@ -229,15 +270,9 @@ export class Engine {
     prompt: string,
     options: DispatchOptions,
   ): Promise<InvocationRecord> {
+    this.store.upsertInvocation(roundId, placeholder(agent.agentId, 'running'))
     const maxAttempts = agent.maxRetries + 1
-    let record: InvocationRecord = {
-      agentId: agent.agentId,
-      status: 'error',
-      attempts: 0,
-      distilled: '',
-      durationMs: 0,
-      truncated: false,
-    }
+    let record = placeholder(agent.agentId, 'error')
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       this.persistEvent(run.runId, {
@@ -247,7 +282,21 @@ export class Engine {
         agentId: agent.agentId,
         attempt,
       })
-      record = await this.runOnce(run, roundId, agent, prompt, attempt, options)
+      try {
+        record = await this.runOnce(run, roundId, agent, prompt, attempt, options)
+      } catch (err) {
+        // Failure isolation: an adapter/runner/fs THROW becomes a terminal error
+        // record — it must never reject and fail the whole round.
+        record = {
+          agentId: agent.agentId,
+          status: 'error',
+          attempts: attempt,
+          distilled: '',
+          errorClass: `engine-error: ${err instanceof Error ? err.message : String(err)}`,
+          durationMs: 0,
+          truncated: false,
+        }
+      }
       if (!isRetriable(record.status) || attempt === maxAttempts) break
       await this.sleep(this.backoff(attempt))
     }
@@ -320,12 +369,12 @@ export class Engine {
   }
 
   private backoff(attempt: number): number {
-    const exp = BACKOFF_BASE_MS * 2 ** (attempt - 1)
+    const exp = Math.min(BACKOFF_BASE_MS * 2 ** (attempt - 1), MAX_BACKOFF_MS)
     return exp + Math.floor(Math.random() * BACKOFF_BASE_MS)
   }
 
-  private persistEvent(runId: string, event: Parameters<EventBus['emit']>[0]): void {
-    this.store.appendEvent(runId, JSON.stringify(event))
-    this.bus.emit(event)
+  private persistEvent(runId: string, event: EngineEvent): void {
+    const seq = this.store.appendEvent(runId, JSON.stringify(event))
+    this.bus.emit(event, seq)
   }
 }

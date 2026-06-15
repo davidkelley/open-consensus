@@ -35,6 +35,17 @@ const floodAdapter: Adapter = {
   parse: (result) => ({ status: result.outcome === 'output-overflow' ? 'error' : 'ok', text: '' }),
 }
 
+/** An adapter whose buildInvocation throws (engine must isolate the failure). */
+const throwingAdapter: Adapter = {
+  id: 'throwing',
+  capabilities: caps,
+  detect: () => Promise.resolve({ available: true }),
+  buildInvocation: () => {
+    throw new Error('boom')
+  },
+  parse: () => ({ status: 'error', text: '' }),
+}
+
 function agent(agentId: string, mode: MockMode = 'ok', over: Partial<PanelAgent> = {}): PanelAgent {
   return {
     agentId,
@@ -184,7 +195,24 @@ describe('Engine.dispatchRound', () => {
     expect(round.verdict).toBe('failed')
   })
 
-  it('bounds concurrency across different tools (waiters queue)', async () => {
+  it('isolates an adapter that throws (failure isolation)', async () => {
+    const run = engine.createRun('p')
+    const round = await engine.dispatchRound(
+      run,
+      {
+        panelId: 'p',
+        quorum: 1,
+        agents: [{ agentId: 't', adapter: throwingAdapter, timeoutMs: 1000, maxRetries: 0 }],
+      },
+      'x',
+    )
+    expect(round.invocations[0]?.status).toBe('error')
+    expect(round.invocations[0]?.errorClass).toContain('engine-error')
+    expect(round.verdict).toBe('failed')
+  })
+
+  it('bounds engine-global concurrency across different tools (waiters queue)', async () => {
+    const limited = new Engine({ store, sleep: () => Promise.resolve(), concurrency: 1 })
     const a: PanelAgent = {
       agentId: 'a',
       adapter: { ...createMockAdapter({ mode: 'ok' }), id: 'mock-a' },
@@ -197,13 +225,39 @@ describe('Engine.dispatchRound', () => {
       timeoutMs: 2000,
       maxRetries: 0,
     }
-    const run = engine.createRun('p')
-    const round = await engine.dispatchRound(
+    const run = limited.createRun('p')
+    const round = await limited.dispatchRound(
       run,
       { panelId: 'p', quorum: 2, concurrency: 1, agents: [a, b] },
       'hi',
     )
     expect(round.verdict).toBe('met')
     expect(round.invocations).toHaveLength(2)
+  })
+
+  it('reconciles a crashed in-flight round on store reopen', async () => {
+    // Simulate a crash mid-dispatch: pending rows exist, round is 'running'.
+    const run = engine.createRun('p')
+    const roundId = '00000000-0000-0000-0000-000000000001'
+    store.startRound({
+      roundId,
+      runId: run.runId,
+      index: 0,
+      prompt: 'x',
+      quorum: 1,
+      state: 'running',
+    })
+    store.upsertInvocation(roundId, {
+      agentId: 'a',
+      status: 'running',
+      attempts: 1,
+      distilled: '',
+      durationMs: 0,
+      truncated: false,
+    })
+    expect(store.reconcile().repairedRounds).toContain(roundId)
+    const repaired = store.getRound(roundId)
+    expect(repaired?.state).toBe('complete')
+    expect(repaired?.invocations[0]?.status).toBe('interrupted')
   })
 })

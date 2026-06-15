@@ -20,14 +20,17 @@ export function distill(
   const buf = Buffer.from(text, 'utf8')
   if (buf.byteLength <= capBytes) return { distilled: text, truncated: false }
 
-  // Keep the TAIL (a CLI's final answer usually trails). Drop the partial first
-  // line so the kept text starts on a clean line boundary.
-  let tail = buf.subarray(buf.byteLength - capBytes).toString('utf8')
+  // Keep the TAIL (a CLI's final answer usually trails). Advance past any UTF-8
+  // continuation bytes so we never start mid-codepoint (which would emit U+FFFD
+  // and inflate the byte length).
+  let start = buf.byteLength - capBytes
+  while (start < buf.byteLength && ((buf[start] as number) & 0xc0) === 0x80) start++
+  let tail = buf.subarray(start).toString('utf8')
+  // Drop the partial first line so the kept text starts on a clean line boundary.
   const firstNewline = tail.indexOf('\n')
   if (firstNewline >= 0 && firstNewline < tail.length - 1) {
     tail = tail.slice(firstNewline + 1)
   }
-  const omitted = buf.byteLength - capBytes
-  const marker = `…[truncated: ${omitted} bytes omitted${rawRef ? `; rawRef=${rawRef}` : ''}]…\n`
+  const marker = `…[truncated: ${start} bytes omitted${rawRef ? `; rawRef=${rawRef}` : ''}]…\n`
   return { distilled: marker + tail, truncated: true }
 }

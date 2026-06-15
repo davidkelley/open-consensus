@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import {
@@ -66,15 +66,18 @@ export class EngineStore {
 
   private migrate(): void {
     const current = this.db.pragma('user_version', { simple: true }) as number
-    if (current < 1) {
+    if (current >= SCHEMA_VERSION) return
+    // Transactional + idempotent (IF NOT EXISTS), so a restart race or a
+    // half-applied prior migration can't corrupt the schema.
+    const tx = this.db.transaction(() => {
       this.db.exec(`
-        CREATE TABLE runs (
+        CREATE TABLE IF NOT EXISTS runs (
           runId TEXT PRIMARY KEY,
           panelId TEXT NOT NULL,
           state TEXT NOT NULL,
           createdAt INTEGER NOT NULL
         );
-        CREATE TABLE rounds (
+        CREATE TABLE IF NOT EXISTS rounds (
           roundId TEXT PRIMARY KEY,
           runId TEXT NOT NULL,
           idx INTEGER NOT NULL,
@@ -83,8 +86,8 @@ export class EngineStore {
           state TEXT NOT NULL,
           verdict TEXT
         );
-        CREATE INDEX rounds_runId ON rounds(runId);
-        CREATE TABLE invocations (
+        CREATE INDEX IF NOT EXISTS rounds_runId ON rounds(runId);
+        CREATE TABLE IF NOT EXISTS invocations (
           roundId TEXT NOT NULL,
           agentId TEXT NOT NULL,
           status TEXT NOT NULL,
@@ -96,14 +99,16 @@ export class EngineStore {
           rawRef TEXT,
           PRIMARY KEY (roundId, agentId)
         );
-        CREATE TABLE events (
+        CREATE TABLE IF NOT EXISTS events (
           seq INTEGER PRIMARY KEY AUTOINCREMENT,
           runId TEXT,
           payload TEXT NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS events_runId ON events(runId);
       `)
       this.db.pragma(`user_version = ${SCHEMA_VERSION}`)
-    }
+    })
+    tx()
   }
 
   // -- writes -------------------------------------------------------------
@@ -260,13 +265,17 @@ export class EngineStore {
         )
         .run()
       const runningRounds = this.db
-        .prepare("SELECT roundId, quorum FROM rounds WHERE state = 'running'")
-        .all() as { roundId: string; quorum: number }[]
-      for (const { roundId, quorum } of runningRounds) {
+        .prepare("SELECT roundId, runId, quorum FROM rounds WHERE state = 'running'")
+        .all() as { roundId: string; runId: string; quorum: number }[]
+      const insertEvent = this.db.prepare('INSERT INTO events (runId, payload) VALUES (?, ?)')
+      for (const { roundId, runId, quorum } of runningRounds) {
         const round = this.getRound(roundId)
         if (!round) continue
         const verdict = computeVerdict(round.invocations, quorum)
         this.completeRound(roundId, verdict)
+        // Append the terminal transition to the durable log so SSE clients on a
+        // fresh daemon don't see the round stuck 'running'.
+        insertEvent.run(runId, JSON.stringify({ type: 'round-completed', runId, roundId, verdict }))
         repaired.push(roundId)
       }
     })
@@ -276,17 +285,14 @@ export class EngineStore {
 
   /** Delete a run and all its rows + raw blobs (coordinated prune, D16). */
   pruneRun(runId: string): void {
+    // Delete rows first (committed atomically); then sweep the blobs. A crash
+    // between leaves harmless orphan blobs, never dangling rows that point at
+    // missing files.
     const tx = this.db.transaction(() => {
       const rounds = this.db.prepare('SELECT roundId FROM rounds WHERE runId = ?').all(runId) as {
         roundId: string
       }[]
       for (const { roundId } of rounds) {
-        const invs = this.db
-          .prepare('SELECT rawRef FROM invocations WHERE roundId = ? AND rawRef IS NOT NULL')
-          .all(roundId) as { rawRef: string }[]
-        for (const { rawRef } of invs) {
-          rmSync(join(this.rawDir, rawFilename(rawRef)), { force: true })
-        }
         this.db.prepare('DELETE FROM invocations WHERE roundId = ?').run(roundId)
       }
       this.db.prepare('DELETE FROM rounds WHERE runId = ?').run(runId)
@@ -294,6 +300,12 @@ export class EngineStore {
       this.db.prepare('DELETE FROM runs WHERE runId = ?').run(runId)
     })
     tx()
+    // Sweep EVERY raw blob for the run (incl. every retry attempt) by filename
+    // prefix — not just the rawRefs still referenced by the final invocations.
+    const prefix = `${runId.replace(/[^A-Za-z0-9._-]/g, '_')}.`
+    for (const name of readdirSync(this.rawDir)) {
+      if (name.startsWith(prefix)) rmSync(join(this.rawDir, name), { force: true })
+    }
   }
 
   close(): void {

@@ -1,9 +1,11 @@
 import type { InvocationStatus, QuorumVerdict } from './model'
 
 /**
- * Typed engine events (plan D11). Every state transition is emitted with a
- * monotonic sequence number; the daemon persists them to the event log and
- * exposes them as both the long-poll snapshot source and the SSE stream.
+ * Typed engine events (plan D11). Every state transition is emitted with the
+ * **durable** sequence number from the persisted event log (the store's
+ * autoincrement rowid), so the sequence is monotonic and stable across daemon
+ * restarts — the daemon uses it for both the long-poll snapshot version and the
+ * SSE `Last-Event-ID`.
  */
 export type EngineEvent =
   | { type: 'run-created'; runId: string; panelId: string }
@@ -22,15 +24,23 @@ export type EngineEvent =
 
 export type EngineEventListener = (event: EngineEvent, seq: number) => void
 
-/** Minimal synchronous in-process event bus with monotonic sequencing. */
+/**
+ * Minimal synchronous in-process event bus. The sequence number is supplied by
+ * the caller (the durable event-log rowid) rather than maintained internally, so
+ * it never drifts from the persisted log. A throwing listener can't corrupt
+ * engine state — listener errors are isolated.
+ */
 export class EventBus {
   private readonly listeners = new Set<EngineEventListener>()
-  private seq = 0
 
-  emit(event: EngineEvent): number {
-    const next = ++this.seq
-    for (const listener of this.listeners) listener(event, next)
-    return next
+  emit(event: EngineEvent, seq: number): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(event, seq)
+      } catch {
+        /* a misbehaving subscriber must not break engine control flow */
+      }
+    }
   }
 
   on(listener: EngineEventListener): () => void {
@@ -38,9 +48,5 @@ export class EventBus {
     return () => {
       this.listeners.delete(listener)
     }
-  }
-
-  get sequence(): number {
-    return this.seq
   }
 }
