@@ -1,6 +1,7 @@
 import type { RunResult } from '@open-consensus/proc'
 import {
   type AdapterOptions,
+  assertPromptSize,
   assertSafeArgs,
   lazyBinary,
   nonExitedResult,
@@ -37,6 +38,7 @@ export function createGeminiAdapter(options: AdapterOptions = {}): Adapter {
     },
     detect: () => probeVersion(bin()),
     buildInvocation(ctx: AdapterInvocationContext): AdapterInvocation {
+      assertPromptSize(ctx.prompt) // argv delivery -> bound the prompt size (D5)
       const args = ['-p', ctx.prompt]
       if (ctx.args) {
         assertSafeArgs(ctx.args, FORBIDDEN)

@@ -1,6 +1,7 @@
 import type { RunResult } from '@open-consensus/proc'
 import {
   type AdapterOptions,
+  assertPromptSize,
   assertSafeArgs,
   lazyBinary,
   nonExitedResult,
@@ -33,6 +34,7 @@ export function createOpencodeAdapter(options: AdapterOptions = {}): Adapter {
     },
     detect: () => probeVersion(bin()),
     buildInvocation(ctx: AdapterInvocationContext): AdapterInvocation {
+      assertPromptSize(ctx.prompt) // argv delivery -> bound the prompt size (D5)
       const args = ['run']
       if (ctx.args) {
         assertSafeArgs(ctx.args, []) // reject a config `--` so our prompt guard holds

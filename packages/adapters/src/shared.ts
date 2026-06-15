@@ -37,7 +37,10 @@ function isFile(path: string): boolean {
   }
 }
 
-const MANDATORY_FLAG_SET = new Set<string>()
+const EMPTY_FLAG_SET = new Set<string>()
+
+/** Conservative cap on a prompt delivered via argv (D5), well under ARG_MAX. */
+const MAX_ARG_PROMPT_BYTES = 128_000
 
 /**
  * Throw if config `args` would defeat an adapter's mandatory flags: a `--`
@@ -45,11 +48,12 @@ const MANDATORY_FLAG_SET = new Set<string>()
  * safety flags into positionals) or any of the adapter's own control flags. This
  * is parser-independent (doesn't rely on the CLI's first/last-wins behavior). The
  * adapter is the last line of defense; the CLI's `agent add` also pre-validates.
- * It does NOT catch every read-only-defeating flag (e.g. claude `--allowedTools`)
- * — that residual is the user's documented responsibility (D20, best-effort).
+ * The deny-list covers DIRECT read-only-bypass flags; indirect vectors (claude
+ * `--allowedTools`, codex `-c sandbox_permissions=…`) remain the user's documented
+ * responsibility (D20, best-effort).
  */
 export function assertSafeArgs(args: readonly string[], forbidden: readonly string[]): void {
-  const deny = forbidden.length ? new Set(forbidden) : MANDATORY_FLAG_SET
+  const deny = forbidden.length ? new Set(forbidden) : EMPTY_FLAG_SET
   for (const arg of args) {
     if (arg === '--') {
       throw new Error('config arg "--" is not allowed: it would defeat the adapter safety flags')
@@ -72,11 +76,27 @@ export function lazyBinary(binPath: string): () => string {
   }
 }
 
-function tryParse(text: string): unknown {
+/** Throw if a prompt is too large for argv delivery (gives a clean error rather
+ * than the runner's E2BIG spawn failure). Used by `arg`-delivery adapters (D5). */
+export function assertPromptSize(prompt: string): void {
+  if (Buffer.byteLength(prompt, 'utf8') > MAX_ARG_PROMPT_BYTES) {
+    throw new Error(
+      `prompt exceeds the ${MAX_ARG_PROMPT_BYTES}-byte cap for argv delivery (this adapter passes the prompt as an argument)`,
+    )
+  }
+}
+
+/** Parse a JSON value, returning it only if it's a plain OBJECT (so `null`,
+ * arrays, and scalars become the `undefined` sentinel — callers expect an
+ * envelope object). JSON.parse never returns `undefined`, so it's safe. */
+function tryParse(text: string): Record<string, unknown> | undefined {
   try {
-    return JSON.parse(text)
+    const value: unknown = JSON.parse(text)
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined
   } catch {
-    return undefined // JSON.parse never returns undefined, so it's a safe sentinel
+    return undefined
   }
 }
 

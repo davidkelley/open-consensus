@@ -14,8 +14,10 @@ import type {
   AdapterParseResult,
 } from './types'
 
-/** Config args that would defeat claude's read-only/JSON defaults (D20). */
-const FORBIDDEN = ['--output-format', '--permission-mode']
+/** Config args that would directly defeat claude's read-only/JSON defaults (D20).
+ * `--dangerously-skip-permissions` is a verified bypass alias for
+ * `--permission-mode bypassPermissions`. */
+const FORBIDDEN = ['--output-format', '--permission-mode', '--dangerously-skip-permissions']
 
 /**
  * Claude Code adapter (plan D8): `claude -p` non-interactive, `--output-format

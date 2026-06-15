@@ -255,6 +255,22 @@ describe('real adapters', () => {
     expect(() => gemini.buildInvocation({ ...ctxFor(), args: ['--yolo'] })).toThrow()
     const opencode = createAdapter('opencode', { binPath: FAKE }) as Adapter
     expect(() => opencode.buildInvocation({ ...ctxFor(), args: ['--'] })).toThrow()
+    // claude's --dangerously-skip-permissions is a verified read-only bypass.
+    expect(() =>
+      claude.buildInvocation({ ...ctxFor(), args: ['--dangerously-skip-permissions'] }),
+    ).toThrow()
+  })
+
+  it('arg-delivery adapters reject an oversized prompt (D5) and a scalar JSON is raw', async () => {
+    const big = { prompt: 'x'.repeat(200_000), cwd: '/tmp' }
+    const gemini = createAdapter('gemini', { binPath: FAKE }) as Adapter
+    expect(() => gemini.buildInvocation(big)).toThrow(/cap for argv/)
+    const opencode = createAdapter('opencode', { binPath: FAKE }) as Adapter
+    expect(() => opencode.buildInvocation(big)).toThrow()
+    // A bare JSON scalar (`null`) is treated as raw text, not a crashing envelope.
+    const claude = createAdapter('claude', { binPath: FAKE }) as Adapter
+    const r = await run(claude, ctxFor(), { FAKE_STDOUT: 'null' })
+    expect(claude.parse(r, ctxFor())).toEqual({ status: 'ok', text: 'null' })
   })
 
   it('parseJsonLoose handles JSONL/streaming + a multi-line object with a banner', async () => {
