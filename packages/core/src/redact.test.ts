@@ -25,11 +25,16 @@ describe('isSecretKey', () => {
     for (const k of [
       'API_KEY',
       'apiKey',
+      'APIKey',
+      'xApiKeyHeader',
       'AUTH_TOKEN',
+      'bearerToken',
       'password',
       'AWS_SECRET_ACCESS_KEY',
       'sessionId',
       'authorization',
+      'creds',
+      'pat',
     ]) {
       expect(isSecretKey(k)).toBe(true)
     }

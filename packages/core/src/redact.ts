@@ -42,12 +42,20 @@ const SECRET_KEY_WORDS: ReadonlySet<string> = new Set([
   'sessionkey',
   'sessiontoken',
   'sessionid',
+  // common abbreviations
+  'cred',
+  'creds',
+  'pat',
+  'tok',
+  'pkey',
+  'priv',
 ])
 
-/** Split a key name into lowercase word tokens (camelCase + separators). */
+/** Split a key name into lowercase word tokens (acronym + camelCase + separators). */
 function keyTokens(key: string): string[] {
   return key
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2') // acronym boundary: APIKey -> API Key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // camelCase boundary
     .split(/[^A-Za-z0-9]+/)
     .map((s) => s.toLowerCase())
     .filter((s) => s.length > 0)
