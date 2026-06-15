@@ -153,7 +153,13 @@ export class Engine {
     this.distillCap = options.distillCap ?? DEFAULT_DISTILL_CAP_BYTES
     this.now = options.now ?? (() => Date.now())
     this.sleep =
-      options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+      options.sleep ??
+      ((ms: number) =>
+        new Promise((resolve) => {
+          // unref so a backoff abandoned by a cancel can never delay process exit.
+          const timer = setTimeout(resolve, ms)
+          if (typeof timer.unref === 'function') timer.unref()
+        }))
     this.daemonId = options.daemonId
     this.globalSem = new Semaphore(Math.max(1, options.concurrency ?? DEFAULT_GLOBAL_CONCURRENCY))
   }
@@ -402,10 +408,17 @@ export class Engine {
           ...(options.signal ? { signal: options.signal } : {}),
           ...(this.daemonId ? { daemonId: this.daemonId } : {}),
           // Record the detached pgid up front so a daemon crash mid-run leaves a
-          // registry entry the next instance can sweep.
+          // registry entry the next instance can sweep. Best-effort: an advisory
+          // registry write must never fail the invocation.
           onSpawn: (pid) => {
             pgid = pid
-            if (this.daemonId) this.store.recordPgid(pid, this.daemonId)
+            if (this.daemonId) {
+              try {
+                this.store.recordPgid(pid, this.daemonId)
+              } catch {
+                /* registry is advisory for the sweep */
+              }
+            }
           },
           // onRaw fires before the runner's own cap, so bound our accumulation
           // too (chunks arriving before a tree-kill lands could exceed the cap).
@@ -436,7 +449,13 @@ export class Engine {
         rawRef,
       }
     } finally {
-      if (pgid !== undefined) this.store.removePgid(pgid)
+      if (pgid !== undefined) {
+        try {
+          this.store.removePgid(pgid)
+        } catch {
+          /* a stale row is swept (and tolerated) by the next instance */
+        }
+      }
       rmSync(scratch, { recursive: true, force: true })
     }
   }

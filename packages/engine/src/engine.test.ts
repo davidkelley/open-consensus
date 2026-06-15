@@ -136,6 +136,17 @@ describe('Engine.dispatchRound', () => {
     expect(store.foreignPgids('d2')).toEqual([])
   })
 
+  it('retries via the real (unref-ed) backoff timer when no sleep is injected', async () => {
+    const eng = new Engine({ store }) // default sleep -> real setTimeout
+    const run = eng.createRun('p')
+    const round = await eng.dispatchRound(
+      run,
+      { panelId: 'p', quorum: 1, agents: [agent('a', 'error', { maxRetries: 1 })] },
+      'x',
+    )
+    expect(round.invocations[0]).toMatchObject({ status: 'error', attempts: 2 })
+  })
+
   it('retries under backoff with a live (un-aborted) signal threaded through', async () => {
     const controller = new AbortController()
     const run = engine.createRun('p')

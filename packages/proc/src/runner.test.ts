@@ -45,6 +45,15 @@ describe('runProcess', () => {
     expect(spawned ?? 0).toBeGreaterThan(0)
   })
 
+  it('survives a throwing onSpawn — the child stays managed', async () => {
+    const r = await run('echo', {
+      onSpawn: () => {
+        throw new Error('registry boom')
+      },
+    })
+    expect(r.outcome).toBe('exited') // still collected + closed normally
+  })
+
   it('delivers stdin and captures a clean exit', async () => {
     const r = await runProcess(
       { file: NODE, args: [FIXTURE, 'echo'], stdin: 'hello world' },

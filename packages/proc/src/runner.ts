@@ -141,7 +141,15 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     }
 
     const pid = child.pid
-    if (pid !== undefined) options.onSpawn?.(pid)
+    if (pid !== undefined) {
+      // A throwing onSpawn (e.g. a registry write failure) must NOT strand the
+      // just-spawned child before its lifecycle handlers are wired up below.
+      try {
+        options.onSpawn?.(pid)
+      } catch {
+        /* the child stays fully managed regardless */
+      }
+    }
 
     const killTree = (): void => {
       if (killing || pid === undefined) return
