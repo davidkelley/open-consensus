@@ -122,12 +122,15 @@ describe('Engine.dispatchRound', () => {
     expect(store.getIdempotent('round:r:k')).toEqual({ runId: run.runId, roundId: 'rd-1' })
   })
 
-  it('abandons a run with a durable run-abandoned event', () => {
+  it('abandons and re-adopts a run, each with a durable event', () => {
     const run = engine.createRun('p')
     engine.abandonRun(run.runId)
     expect(store.getRun(run.runId)?.state).toBe('abandoned')
+    engine.readoptRun(run.runId)
+    expect(store.getRun(run.runId)?.state).toBe('running')
     const types = store.readEvents().events.map((e) => JSON.parse(e.payload).type)
     expect(types).toContain('run-abandoned')
+    expect(types).toContain('run-readopted')
   })
 
   it('redacts secrets from distilled text and raw blobs before persisting (D10)', async () => {

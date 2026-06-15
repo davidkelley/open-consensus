@@ -192,6 +192,18 @@ export class Engine {
     })
   }
 
+  /**
+   * Re-adopt a parked run (D14): flip `abandoned` back to `running` so a returning
+   * orchestrator can continue it with a new round. Durable + observable via the
+   * `run-readopted` event. No-op if the run isn't abandoned.
+   */
+  readoptRun(runId: string): void {
+    this.persistWith(runId, () => this.store.setRunState(runId, 'running'), {
+      type: 'run-readopted',
+      runId,
+    })
+  }
+
   createRun(panelId: string): RunRecord {
     const run: RunRecord = {
       runId: randomUUID(),

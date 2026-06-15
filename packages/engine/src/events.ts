@@ -21,6 +21,7 @@ export type EngineEvent =
     }
   | { type: 'round-completed'; runId: string; roundId: string; verdict: QuorumVerdict }
   | { type: 'run-abandoned'; runId: string }
+  | { type: 'run-readopted'; runId: string }
 
 export type EngineEventListener = (event: EngineEvent, seq: number) => void
 

@@ -38,7 +38,8 @@ Other tools:
   round; also heartbeats the run so the idle reaper doesn't park it while you
   reason quietly.
 - `consensus_list_runs({ state? })` — **re-anchor** after you restart: a parked
-  (`abandoned`) run can be re-adopted by polling it.
+  (`abandoned`) run is re-adopted (un-parked back to running) by calling
+  `consensus_status` on it, after which you can continue it with `consensus_round`.
 - `consensus_get_raw({ rawRef, cursor?, maxBytes? })` — fetch an agent's full raw
   output, **paginated** by byte cursor with a hard per-call cap (never an
   unbounded payload). Use it when a result is `truncated` before judging.

@@ -134,9 +134,15 @@ export class DaemonCore {
   status(
     runId: string,
   ): { run: RunRecord; round: RoundRecord | undefined; stateVersion: number } | undefined {
-    const run = this.store.getRun(runId)
+    let run = this.store.getRun(runId)
     if (!run) return undefined
     this.touch(runId)
+    // Re-adopt a parked run (D14): a status check is the orchestrator taking it
+    // back over, so un-park it to `running` and it can be continued with a round.
+    if (run.state === 'abandoned') {
+      this.engine.readoptRun(runId)
+      run = { ...run, state: 'running' }
+    }
     return {
       run,
       round: this.store.latestRound(runId),

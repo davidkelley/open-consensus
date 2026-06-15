@@ -164,6 +164,20 @@ describe('DaemonCore runs', () => {
     expect(h.core.status('ghost')).toBeUndefined()
   })
 
+  it('re-adopts a parked run on status so it can be continued (D14)', async () => {
+    const started = h.core.startRun('p-ok', 'x')
+    if (!('runId' in started)) throw new Error('start failed')
+    await h.core.drain()
+    h.core.engine.abandonRun(started.runId)
+    expect(h.core.getRun(started.runId)?.state).toBe('abandoned')
+    // A status check re-adopts the parked run back to running...
+    expect(h.core.status(started.runId)?.run.state).toBe('running')
+    expect(h.core.getRun(started.runId)?.state).toBe('running')
+    // ...so a new round can be started on it.
+    expect('roundId' in h.core.startRound(started.runId, 'continue')).toBe(true)
+    await h.core.drain()
+  })
+
   it('polling a round that is not in-flight returns its current snapshot', async () => {
     const started = h.core.startRun('p-ok', 'x')
     if (!('runId' in started)) throw new Error('start failed')

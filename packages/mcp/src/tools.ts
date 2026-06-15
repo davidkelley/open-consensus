@@ -121,7 +121,7 @@ export const TOOLS: ToolDef[] = [
     name: 'consensus_list_runs',
     title: 'List runs',
     description:
-      'List consensus runs, optionally filtered by state. Use this to re-anchor to in-flight runs after you (the orchestrator) restart — a parked/abandoned run can be re-adopted by polling it.',
+      'List consensus runs, optionally filtered by state. Use this to re-anchor to in-flight runs after you (the orchestrator) restart — a parked (`abandoned`) run is re-adopted (un-parked back to running) by calling consensus_status on it, after which you can continue it with consensus_round.',
     inputSchema: { state: z.enum(['running', 'abandoned']).optional() },
     async handler(ctx, args) {
       return { runs: await ctx.client.listRuns(args.state) }
@@ -191,7 +191,7 @@ export const TOOLS: ToolDef[] = [
     name: 'consensus_status',
     title: 'Run status',
     description:
-      'Snapshot a run and its most recent round without blocking. Also heartbeats the run so the idle reaper does not park it while you reason. Returns a next_action hint.',
+      'Snapshot a run and its most recent round without blocking. Heartbeats the run so the idle reaper does not park it while you reason, and RE-ADOPTS a parked (`abandoned`) run — flipping it back to running so you can continue it with consensus_round.',
     inputSchema: { runId: z.string().min(1) },
     async handler(ctx, args) {
       const s = await ctx.client.status(args.runId)
