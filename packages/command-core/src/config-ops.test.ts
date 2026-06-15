@@ -193,6 +193,10 @@ describe('panel commands', () => {
     expect(listPanelsCommand(ctx).map((p) => p.id)).toEqual(['p'])
   })
 
+  it('rejects a non-positive concurrency (reaches zod, not silently dropped)', () => {
+    expect(() => createPanelCommand(ctx, { id: 'p', agentIds: ['a'], concurrency: 0 })).toThrow()
+  })
+
   it('adds and removes agents, clamping quorum', () => {
     createPanelCommand(ctx, { id: 'p', agentIds: ['a', 'b'], quorum: 2 })
     const added = panelAddAgentCommand(ctx, 'p', 'c')

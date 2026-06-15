@@ -281,7 +281,9 @@ export function createPanelCommand(ctx: ConfigContext, input: CreatePanelInput):
     name: input.name ?? input.id,
     agentIds: input.agentIds,
     quorum: input.quorum ?? input.agentIds.length,
-    ...(input.concurrency ? { concurrency: input.concurrency } : {}),
+    // `!== undefined` (not truthy): a stray `concurrency: 0` must reach zod to be
+    // rejected as non-positive, not be silently dropped to the default.
+    ...(input.concurrency !== undefined ? { concurrency: input.concurrency } : {}),
   })
   saveConfig(addPanel(read(ctx), panel), ctx.configFile)
   return panel
