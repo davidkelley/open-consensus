@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { type Server, createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -233,6 +233,33 @@ describe('ensureDaemonRunning', () => {
         expectedConfigPath: '/tmp/config-b.json',
       }),
     ).rejects.toThrow(/different config/)
+  })
+
+  it('refuses to reuse a daemon that does not report its config', async () => {
+    writeDiscovery({})
+    healthConfig = undefined // an in-process/older daemon — identity unconfirmable
+    await expect(
+      ensureDaemonRunning({ discoveryPath, launch: () => {}, expectedConfigPath: '/tmp/x.json' }),
+    ).rejects.toThrow(/did not report its config/)
+  })
+
+  it('treats a symlinked config path as the same config', async () => {
+    const real = join(dir, 'config.json')
+    const link = join(dir, 'config-link.json')
+    writeFileSync(real, '{}')
+    symlinkSync(real, link)
+    writeDiscovery({})
+    healthConfig = link // daemon started via the symlink…
+    let launched = false
+    const d = await ensureDaemonRunning({
+      discoveryPath,
+      launch: () => {
+        launched = true
+      },
+      expectedConfigPath: real, // …CLI uses the canonical path -> still a match
+    })
+    expect(d.endpoint).toBe(endpoint)
+    expect(launched).toBe(false)
   })
 })
 

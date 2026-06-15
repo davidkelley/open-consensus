@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   type DaemonResponse,
@@ -335,14 +336,35 @@ async function fetchHealth(
   }
 }
 
-/** Throw if a running daemon loaded a different config than the caller intends. */
+/** Canonical path for comparison: realpath (deref symlinks) when the file exists,
+ * else fall back to lexical resolve so a not-yet-created path still compares. */
+function canonicalPath(p: string): string {
+  try {
+    return realpathSync(p)
+  } catch {
+    return resolve(p)
+  }
+}
+
+/**
+ * Throw if a running daemon's config doesn't match what the caller intends. A
+ * daemon that doesn't report a config at all (an in-process/older daemon) can't
+ * be confirmed, so it's also refused — never silently reused — when a specific
+ * config is expected. Paths are compared canonically so a symlink alias of the
+ * same file isn't mistaken for a different config.
+ */
 function assertConfigMatches(
   health: { config?: string },
   expected: string | undefined,
   endpoint: string,
 ): void {
-  if (expected === undefined || health.config === undefined) return
-  if (resolve(health.config) !== resolve(expected)) {
+  if (expected === undefined) return
+  if (health.config === undefined) {
+    throw new Error(
+      `a daemon is already running on ${endpoint} but did not report its config; stop it with \`daemon stop\` so the next start loads ${expected}`,
+    )
+  }
+  if (canonicalPath(health.config) !== canonicalPath(expected)) {
     throw new Error(
       `a daemon is already running on ${endpoint} with a different config (${health.config}); stop it with \`daemon stop\` to use ${expected}`,
     )
