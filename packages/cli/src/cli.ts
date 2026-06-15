@@ -25,7 +25,11 @@ const daemonRegistry = () => defaultRegistry({ includeUnsandboxed: true, include
 /** Resolve when a shutdown signal arrives (the foreground `daemon serve` loop). */
 function waitForShutdown(): Promise<void> {
   return new Promise((resolve) => {
-    const onSignal = () => resolve()
+    const onSignal = () => {
+      process.removeListener('SIGTERM', onSignal)
+      process.removeListener('SIGINT', onSignal)
+      resolve()
+    }
     process.once('SIGTERM', onSignal)
     process.once('SIGINT', onSignal)
   })

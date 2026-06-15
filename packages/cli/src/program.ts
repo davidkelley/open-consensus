@@ -78,17 +78,14 @@ function parsePositiveInt(value: string, label: string): number {
 
 /**
  * Parse repeated `--env KEY=VALUE` flags into a record. A malformed pair could
- * contain a secret (e.g. `API_KEYsk-...`), so the error never echoes the raw
- * value — only the key portion before the (missing/leading) separator.
+ * itself be (or contain) a secret, so the error **never echoes any part of the
+ * input** — it only names which flag failed.
  */
 function parseEnv(pairs: string[]): Record<string, string> {
   const env: Record<string, string> = {}
   for (const pair of pairs) {
     const eq = pair.indexOf('=')
-    if (eq <= 0) {
-      const key = eq === 0 ? '' : pair.split(/[^A-Za-z0-9_]/, 1)[0]
-      throw new CliError(`--env must be KEY=VALUE (e.g. FOO=bar); could not parse key '${key}'`)
-    }
+    if (eq <= 0) throw new CliError('--env must be KEY=VALUE with a non-empty key (e.g. FOO=bar)')
     env[pair.slice(0, eq)] = pair.slice(eq + 1)
   }
   return env

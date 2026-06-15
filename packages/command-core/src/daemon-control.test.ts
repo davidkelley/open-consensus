@@ -111,6 +111,13 @@ describe('daemon RPC', () => {
     expect((await listDaemonPanelsCommand(discoveryPath)).map((p) => p.id)).toEqual(['p'])
   })
 
+  it('listRunsCommand validates the state filter at the boundary', async () => {
+    writeDiscovery({})
+    await expect(listRunsCommand(discoveryPath, 'bogus' as unknown as 'running')).rejects.toThrow(
+      /invalid run state/,
+    )
+  })
+
   it('throws DaemonRpcError on a non-2xx JSON response', async () => {
     writeDiscovery({})
     await expect(runStatusCommand(discoveryPath, 'bad')).rejects.toMatchObject({

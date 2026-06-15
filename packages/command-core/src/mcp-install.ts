@@ -112,7 +112,12 @@ function coerceEntry(value: unknown): McpServerEntry | undefined {
   return parsed.success ? normalize(parsed.data) : undefined
 }
 
-/** Canonicalize an entry: copy args in order, sort env keys (order-independent). */
+/**
+ * Canonicalize an entry for comparison. `args` are a positional command line —
+ * their ORDER IS SIGNIFICANT, so they are copied as-is (sorting them would change
+ * the command's meaning). `env` is a map, so its keys are sorted to make
+ * idempotency insensitive to hand-edited key order.
+ */
 function normalize(entry: McpServerEntry): McpServerEntry {
   const out: McpServerEntry = { command: entry.command, args: [...entry.args] }
   const env = entry.env

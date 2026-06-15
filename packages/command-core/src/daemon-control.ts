@@ -157,15 +157,26 @@ export async function runStatusCommand(
   return parse(res)
 }
 
-/** List runs the daemon knows about, optionally filtered by state. */
+/** Run states a caller may filter `listRunsCommand` by. */
+export const RUN_STATE_FILTERS = ['running', 'abandoned'] as const
+export type RunStateFilter = (typeof RUN_STATE_FILTERS)[number]
+
+/**
+ * List runs the daemon knows about, optionally filtered by state. The filter is
+ * validated at this boundary (not just in the CLI), so any caller — the TUI
+ * included — gets a clear error rather than building an invalid daemon query.
+ */
 export async function listRunsCommand(
   discoveryPath: string,
-  state?: 'running' | 'abandoned',
+  state?: RunStateFilter,
 ): Promise<RunRecord[]> {
+  if (state !== undefined && !RUN_STATE_FILTERS.includes(state)) {
+    throw new Error(`invalid run state filter '${state}' (expected running|abandoned)`)
+  }
   const d = requireDiscovery(discoveryPath)
   const res = await daemonRequest(d.endpoint, d.token, {
     method: 'GET',
-    path: `/runs${state ? `?state=${state}` : ''}`,
+    path: `/runs${state ? `?state=${encodeURIComponent(state)}` : ''}`,
     timeoutMs: 10_000,
   })
   return parse<{ runs: RunRecord[] }>(res).runs
@@ -288,10 +299,11 @@ export interface StopDaemonResult {
  * PID reports cleanly rather than throwing.
  *
  * Crucially, it **only signals a PID it has confirmed is our daemon** — it first
- * health-checks the discovered endpoint (which answers only with our token). If
- * the daemon isn't responding, the discovery file is treated as stale and **no
- * signal is sent**, so a recycled PID now owned by an unrelated process is never
- * killed (the reviewer-flagged PID-reuse hazard).
+ * health-checks the discovered endpoint. `/health` sits behind the daemon's
+ * bearer-token check, so a `200` proves the listener holds our token (i.e. it IS
+ * our daemon), not merely that *something* is on that port. If the daemon isn't
+ * responding, the discovery file is treated as stale and **no signal is sent**,
+ * so a recycled PID now owned by an unrelated process is never killed.
  */
 export async function stopDaemonCommand(
   discoveryPath: string,
@@ -307,7 +319,7 @@ export async function stopDaemonCommand(
     return {
       stopped: false,
       pid,
-      reason: `daemon at ${discovery.endpoint} is not responding; not signalling pid ${pid} (it may be stale/reused). Remove the discovery file or kill it manually if it is wedged.`,
+      reason: `daemon at ${discovery.endpoint} is not responding — the discovery file is likely stale. Not signalling pid ${pid} (it may have been reused by an unrelated process). Run \`daemon start\` to recheck and replace it.`,
     }
   }
   try {
