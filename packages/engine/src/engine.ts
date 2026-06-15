@@ -45,6 +45,9 @@ export interface DispatchOptions {
   /** Pre-generated round id, so an async caller (the daemon) can track the round
    * by id immediately rather than waiting for dispatchRound to resolve. */
   roundId?: string
+  /** Reserve this idempotency key in the SAME transaction as the round row (D12),
+   * so a crash can't leave a round with no dedup mapping. */
+  idempotency?: { key: string }
 }
 
 export interface EngineOptions {
@@ -189,33 +192,76 @@ export class Engine {
     })
   }
 
-  createRun(
-    panelId: string,
-    opts: { idempotency?: { key: string; roundId: string } } = {},
-  ): RunRecord {
+  createRun(panelId: string): RunRecord {
     const run: RunRecord = {
       runId: randomUUID(),
       panelId,
       state: 'running',
       createdAt: this.now(),
     }
-    this.persistWith(
-      run.runId,
-      () => {
-        this.store.createRun(run)
-        // Reserve the idempotency key in the SAME transaction as the run row, so a
-        // crash can never leave a run with no dedup mapping (a retry would then
-        // duplicate work) — closing the create-then-record window (D12).
-        if (opts.idempotency) {
-          this.store.reserveIdempotent(opts.idempotency.key, run.runId, opts.idempotency.roundId)
-        }
-      },
-      { type: 'run-created', runId: run.runId, panelId },
-    )
+    this.persistWith(run.runId, () => this.store.createRun(run), {
+      type: 'run-created',
+      runId: run.runId,
+      panelId,
+    })
     return run
   }
 
-  /** Fan a prompt out to the whole panel and return the completed round. */
+  /**
+   * Open a NEW run together with its first round (and optional idempotency key) in
+   * ONE transaction, then dispatch the round's agents in the background. Crash-safe
+   * (D12/D15): the run row, round row, pending invocations, dedup key, and both
+   * events commit atomically — so a replayed key can never point at a run/round
+   * that was never durably created. Returns the run, the round id, and a promise
+   * that resolves when the round completes.
+   */
+  openRun(
+    panelId: string,
+    panel: Panel,
+    prompt: string,
+    options: DispatchOptions = {},
+  ): { run: RunRecord; roundId: string; done: Promise<RoundRecord> } {
+    const run: RunRecord = { runId: randomUUID(), panelId, state: 'running', createdAt: this.now() }
+    const roundId = options.roundId ?? randomUUID()
+    const index = 0
+    const safePrompt = redactString(prompt)
+    const agentIds = panel.agents.map((a) => a.agentId)
+    const runCreated: EngineEvent = { type: 'run-created', runId: run.runId, panelId }
+    const roundStarted: EngineEvent = {
+      type: 'round-started',
+      runId: run.runId,
+      roundId,
+      index,
+      agentIds,
+    }
+    const seqs = this.store.commitWithEvents(
+      run.runId,
+      [JSON.stringify(runCreated), JSON.stringify(roundStarted)],
+      () => {
+        this.store.createRun(run)
+        this.store.startRoundWithPending(
+          {
+            roundId,
+            runId: run.runId,
+            index,
+            prompt: safePrompt,
+            quorum: panel.quorum,
+            state: 'running',
+          },
+          agentIds,
+        )
+        if (options.idempotency)
+          this.store.reserveIdempotent(options.idempotency.key, run.runId, roundId)
+      },
+    )
+    this.bus.emit(runCreated, seqs[0] as number)
+    this.bus.emit(roundStarted, seqs[1] as number)
+    const done = this.completeRoundAgents(run, roundId, index, prompt, safePrompt, panel, options)
+    return { run, roundId, done }
+  }
+
+  /** Fan a prompt out to the whole panel on an EXISTING run and return the
+   * completed round. The round row (+ optional dedup key) starts atomically. */
   async dispatchRound(
     run: RunRecord,
     panel: Panel,
@@ -228,12 +274,12 @@ export class Engine {
     // The prompt is user-supplied and may carry a pasted secret, so the PERSISTED
     // + served copy is redacted (D10); agents still receive the original prompt.
     const safePrompt = redactString(prompt)
-    // Atomically start the round, insert a `pending` row for EVERY agent, and log
-    // round-started — so a crash mid-setup never leaves a `running` round with a
-    // partial agent set that reconcile would mis-verdict (D15).
+    // Atomically start the round, insert a `pending` row for EVERY agent, reserve
+    // the dedup key, and log round-started — so a crash mid-setup never leaves a
+    // `running` round with a partial agent set (D15) or a key with no round (D12).
     this.persistWith(
       run.runId,
-      () =>
+      () => {
         this.store.startRoundWithPending(
           {
             roundId,
@@ -244,10 +290,29 @@ export class Engine {
             state: 'running',
           },
           agentIds,
-        ),
+        )
+        if (options.idempotency)
+          this.store.reserveIdempotent(options.idempotency.key, run.runId, roundId)
+      },
       { type: 'round-started', runId: run.runId, roundId, index, agentIds },
     )
+    return this.completeRoundAgents(run, roundId, index, prompt, safePrompt, panel, options)
+  }
 
+  /**
+   * The async tail shared by dispatchRound + openRun: fan out to the agents
+   * (failure-isolated), compute the quorum verdict, and complete the round. The
+   * round row already exists; this never re-creates it.
+   */
+  private async completeRoundAgents(
+    run: RunRecord,
+    roundId: string,
+    index: number,
+    prompt: string,
+    safePrompt: string,
+    panel: Panel,
+    options: DispatchOptions,
+  ): Promise<RoundRecord> {
     let invocations: InvocationRecord[]
     try {
       invocations = await this.dispatchAgents(run, roundId, panel, prompt, options)

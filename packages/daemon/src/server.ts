@@ -231,9 +231,10 @@ export class DaemonServer {
       const ref = url.searchParams.get('ref')
       if (!ref) return sendError(res, 400, 'ref is required')
       const cursor = parseIntParam(url.searchParams.get('cursor'), 0)
-      // Clamp the page to a server cap so a client can't ask for an unbounded read.
+      // Clamp the page to [1, cap]: the cap stops an unbounded read, the floor of 1
+      // stops a non-progressing `maxBytes=0` pagination loop.
       const maxBytes = Math.min(
-        parseIntParam(url.searchParams.get('maxBytes'), 64_000),
+        Math.max(parseIntParam(url.searchParams.get('maxBytes'), 64_000), 1),
         RAW_PAGE_CAP,
       )
       return sendJson(res, 200, this.core.readRaw(ref, cursor, maxBytes))

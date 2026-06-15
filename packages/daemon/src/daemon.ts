@@ -166,16 +166,15 @@ export class DaemonCore {
     const panel = resolvePanel(this.config, this.adapters, panelId)
     if (!panel) return { error: `unknown panel '${panelId}'` }
     if (panel.agents.length === 0) return { error: `panel '${panelId}' has no resolvable agents` }
-    if (key) {
-      // Reserve the key ATOMICALLY with the run row (engine creates both in one
-      // transaction). The roundId is pre-generated so it goes into that mapping.
-      const roundId = randomUUID()
-      const run = this.engine.createRun(panelId, { idempotency: { key, roundId } })
-      this.beginRound(run, panel, prompt, roundId)
-      return { runId: run.runId, roundId }
-    }
-    const run = this.engine.createRun(panelId)
-    const roundId = this.beginRound(run, panel, prompt)
+    // Open the run + its first round atomically (engine.openRun commits run, round,
+    // pending invocations, and the dedup key in one transaction), then track the
+    // background dispatch for polling/cancel.
+    const abort = new AbortController()
+    const { run, roundId, done } = this.engine.openRun(panelId, panel, prompt, {
+      signal: abort.signal,
+      ...(key ? { idempotency: { key } } : {}),
+    })
+    this.trackInflight(roundId, run.runId, done, abort)
     return { runId: run.runId, roundId }
   }
 
@@ -200,24 +199,34 @@ export class DaemonCore {
     if (run.state !== 'running') return { error: `run '${runId}' is ${run.state}` }
     const panel = resolvePanel(this.config, this.adapters, run.panelId)
     if (!panel) return { error: `panel '${run.panelId}' is no longer resolvable` }
-    const roundId = this.beginRound(run, panel, prompt)
-    if (key) this.store.reserveIdempotent(key, runId, roundId)
+    // Start the round (+ reserve the key atomically with the round row) and track
+    // the background dispatch.
+    const abort = new AbortController()
+    const roundId = randomUUID()
+    const done = this.engine.dispatchRound(run, panel, prompt, {
+      signal: abort.signal,
+      roundId,
+      ...(key ? { idempotency: { key } } : {}),
+    })
+    this.trackInflight(roundId, run.runId, done, abort)
     return { roundId }
   }
 
-  /** Dispatch a round in the background; track it so callers can poll/cancel. */
-  private beginRound(run: RunRecord, panel: Panel, prompt: string, roundId = randomUUID()): string {
-    const abort = new AbortController()
-    const promise = this.engine
-      .dispatchRound(run, panel, prompt, { signal: abort.signal, roundId })
+  /** Track an in-flight round's completion promise so callers can poll/cancel it. */
+  private trackInflight(
+    roundId: string,
+    runId: string,
+    done: Promise<unknown>,
+    abort: AbortController,
+  ): void {
+    const promise = done
       .then(
         () => {},
         () => {},
       )
       .finally(() => this.inflight.delete(roundId))
-    this.inflight.set(roundId, { runId: run.runId, promise, abort })
-    this.touch(run.runId)
-    return roundId
+    this.inflight.set(roundId, { runId, promise, abort })
+    this.touch(runId)
   }
 
   // -- poll --------------------------------------------------------------

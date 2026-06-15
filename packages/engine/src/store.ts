@@ -234,6 +234,20 @@ export class EngineStore {
     return seq
   }
 
+  /**
+   * Like {@link commitWithEvent} but appends SEVERAL events in one transaction —
+   * for an operation that spans multiple state transitions (e.g. open a run AND
+   * its first round atomically, D12). Returns the events' durable seqs in order.
+   */
+  commitWithEvents(runId: string, payloads: readonly string[], mutate: () => void): number[] {
+    const seqs: number[] = []
+    this.db.transaction(() => {
+      mutate()
+      for (const p of payloads) seqs.push(this.appendEvent(runId, p))
+    })()
+    return seqs
+  }
+
   // -- orphan process-group registry (plan D10) --------------------------
 
   /** Record a spawned detached pgid against the owning daemon instance. */

@@ -98,9 +98,28 @@ describe('Engine.dispatchRound', () => {
     expect(store.getRound('fixed-round-id')?.verdict).toBe('met')
   })
 
-  it('createRun reserves an idempotency key atomically with the run row', () => {
-    const run = engine.createRun('p', { idempotency: { key: 'start:p:k', roundId: 'rd-x' } })
-    expect(store.getIdempotent('start:p:k')).toEqual({ runId: run.runId, roundId: 'rd-x' })
+  it('openRun creates run + first round + idempotency key atomically, then dispatches', async () => {
+    const { run, roundId, done } = engine.openRun(
+      'p',
+      { panelId: 'p', quorum: 1, agents: [agent('a')] },
+      'hello',
+      { idempotency: { key: 'start:p:k' } },
+    )
+    // The run row, round row, and dedup key all exist BEFORE any agent work.
+    expect(store.getIdempotent('start:p:k')).toEqual({ runId: run.runId, roundId })
+    expect(store.getRound(roundId)?.runId).toBe(run.runId)
+    const round = await done
+    expect(round.verdict).toBe('met')
+    expect(round.invocations[0]?.distilled).toBe('ok:hello')
+  })
+
+  it('dispatchRound reserves a round-scoped idempotency key with the round row', async () => {
+    const run = engine.createRun('p')
+    await engine.dispatchRound(run, { panelId: 'p', quorum: 1, agents: [agent('a')] }, 'x', {
+      idempotency: { key: 'round:r:k' },
+      roundId: 'rd-1',
+    })
+    expect(store.getIdempotent('round:r:k')).toEqual({ runId: run.runId, roundId: 'rd-1' })
   })
 
   it('abandons a run with a durable run-abandoned event', () => {
