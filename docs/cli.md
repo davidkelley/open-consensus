@@ -63,6 +63,11 @@ open-consensus daemon serve     # run in the foreground (what `start` spawns)
 `daemon start` is idempotent: it auto-starts a detached `daemon serve` only when
 no healthy daemon is already listening. `run start` auto-starts the daemon too.
 
+The daemon is a **per-user singleton** and snapshots its config at startup. If you
+point `OPEN_CONSENSUS_CONFIG` at a different file while a daemon is already
+running, commands won't silently dispatch against the wrong roster — they error
+and tell you to `daemon stop` first so the next start picks up the new config.
+
 ## Runs
 
 ```sh

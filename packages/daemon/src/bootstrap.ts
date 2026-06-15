@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { chmodSync, lstatSync, mkdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
-import { type Config, loadConfig } from '@open-consensus/config'
+import { join, resolve } from 'node:path'
+import { type Config, configPath, loadConfig } from '@open-consensus/config'
 import { type AppPaths, appPaths } from '@open-consensus/core'
 import { EngineStore } from '@open-consensus/engine'
 import { daemonRequest } from './client'
@@ -107,6 +107,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
   let reaper: ReturnType<typeof setInterval> | undefined
   try {
     const config = opts.config ?? loadConfig(opts.configPath)
+    // The absolute config path this daemon loaded (surfaced via /health so a
+    // client can detect a config mismatch). An in-process `config` override has
+    // no file path, so it's omitted.
+    const configFilePath =
+      opts.config !== undefined ? undefined : resolve(opts.configPath ?? configPath())
     store = new EngineStore({
       dbPath: join(paths.state, DB_NAME),
       rawDir: join(paths.data, RAW_DIRNAME),
@@ -128,7 +133,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
     await core.sweepOrphans()
 
     const token = opts.token ?? generateToken()
-    server = new DaemonServer({ core, token })
+    server = new DaemonServer({
+      core,
+      token,
+      ...(configFilePath !== undefined ? { configPath: configFilePath } : {}),
+    })
     const target = chooseTarget(paths, opts.loopback ?? false)
     const endpoint = await server.listen(target)
     // Record this process's PID so `open-consensus daemon stop` can signal the

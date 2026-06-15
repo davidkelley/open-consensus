@@ -23,6 +23,9 @@ export interface DaemonServerOptions {
   pingMs?: number
   /** Cap on concurrent SSE connections (excess get 503). */
   maxSseClients?: number
+  /** Absolute config-file path this daemon loaded; surfaced via /health so a
+   * client can detect it's talking to a daemon started with a different config. */
+  configPath?: string
 }
 
 /**
@@ -109,6 +112,7 @@ export class DaemonServer {
   private readonly maxBodyBytes: number
   private readonly pingMs: number
   private readonly maxSseClients: number
+  private readonly configFilePath: string | undefined
   /** Set once when bound to loopback: the exact `host:port` we require. */
   private expectedHost: string | undefined
   /** True once `listen()` has bound, so `close()` won't hang on a dead server. */
@@ -122,6 +126,7 @@ export class DaemonServer {
     this.maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
     this.pingMs = opts.pingMs ?? DEFAULT_PING_MS
     this.maxSseClients = opts.maxSseClients ?? DEFAULT_MAX_SSE_CLIENTS
+    this.configFilePath = opts.configPath
     this.http = createServer((req, res) => {
       this.handle(req, res).catch(() => {
         if (!res.headersSent) sendError(res, 500, 'internal error')
@@ -222,10 +227,15 @@ export class DaemonServer {
       return sendError(res, 400, 'malformed path') // invalid percent-encoding
     }
 
-    // Report this process's PID so `daemon stop` can confirm the discovered PID
-    // still belongs to the live (token-authenticated) daemon before signalling it.
+    // Report this process's PID (so `daemon stop` can confirm the discovered PID
+    // still belongs to the live daemon) and the config path it loaded (so a client
+    // can detect a daemon started with a different config than it intends to use).
     if (method === 'GET' && url.pathname === '/health') {
-      return sendJson(res, 200, { ok: true, pid: process.pid })
+      return sendJson(res, 200, {
+        ok: true,
+        pid: process.pid,
+        ...(this.configFilePath !== undefined ? { config: this.configFilePath } : {}),
+      })
     }
     if (method === 'GET' && url.pathname === '/panels') {
       return sendJson(res, 200, { panels: this.core.listPanels() })

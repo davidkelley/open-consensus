@@ -103,6 +103,9 @@ export function buildProgram(deps: CliDeps): Command {
   const ensureOpts = {
     discoveryPath: deps.discoveryPath,
     launch: deps.launchDaemon,
+    // So `daemon start` / `run start` refuse to reuse a daemon already running
+    // with a different config than this invocation resolved (D21).
+    expectedConfigPath: deps.configFile,
     ...(deps.ensureAttempts !== undefined ? { attempts: deps.ensureAttempts } : {}),
     ...(deps.ensureIntervalMs !== undefined ? { intervalMs: deps.ensureIntervalMs } : {}),
   }

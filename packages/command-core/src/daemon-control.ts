@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
+import { resolve } from 'node:path'
 import {
   type DaemonResponse,
   type Discovery,
@@ -227,6 +228,13 @@ export interface EnsureDaemonDeps {
   discoveryPath: string
   /** Start the daemon when it isn't already healthy (spawn detached, or in-process for tests). */
   launch: () => void | Promise<void>
+  /**
+   * The config-file path this invocation intends to use. If a daemon is ALREADY
+   * running with a different config, we error rather than silently dispatch
+   * against the wrong roster (the daemon snapshots its config at startup, so a
+   * config switch needs a restart). Omit to skip the check.
+   */
+  expectedConfigPath?: string
   attempts?: number
   intervalMs?: number
 }
@@ -235,12 +243,21 @@ export interface EnsureDaemonDeps {
  * Ensure a healthy daemon is reachable, auto-starting it if absent (D21) — the
  * shared logic the CLI's `daemon start` and the TUI both use, so there's no
  * duplication and neither ever silently hangs. Returns the live {@link Discovery}.
+ *
+ * If a daemon is already running it is reused, but only after confirming it
+ * loaded the same config the caller intends (see {@link EnsureDaemonDeps.expectedConfigPath});
+ * a mismatch throws rather than silently dispatching against the wrong config.
  */
 export async function ensureDaemonRunning(deps: EnsureDaemonDeps): Promise<Discovery> {
   const existing = readDiscovery(deps.discoveryPath)
-  if (existing && (await waitForReady(existing, { attempts: 1, intervalMs: 0 }))) {
-    return existing
+  if (existing) {
+    const health = await fetchHealth(existing)
+    if (health) {
+      assertConfigMatches(health, deps.expectedConfigPath, existing.endpoint)
+      return existing
+    }
   }
+  // We start the daemon with OUR config, so the post-launch poll needs no check.
   await deps.launch()
   const attempts = deps.attempts ?? 50
   const intervalMs = deps.intervalMs ?? 100
@@ -304,7 +321,7 @@ export interface StopDaemonResult {
  * the daemon isn't answering / didn't return a 200 JSON body. */
 async function fetchHealth(
   discovery: Discovery,
-): Promise<{ ok?: boolean; pid?: number } | undefined> {
+): Promise<{ ok?: boolean; pid?: number; config?: string } | undefined> {
   try {
     const res = await daemonRequest(discovery.endpoint, discovery.token, {
       method: 'GET',
@@ -312,9 +329,23 @@ async function fetchHealth(
       timeoutMs: 2000,
     })
     if (res.status !== 200) return undefined
-    return JSON.parse(res.body) as { ok?: boolean; pid?: number }
+    return JSON.parse(res.body) as { ok?: boolean; pid?: number; config?: string }
   } catch {
     return undefined
+  }
+}
+
+/** Throw if a running daemon loaded a different config than the caller intends. */
+function assertConfigMatches(
+  health: { config?: string },
+  expected: string | undefined,
+  endpoint: string,
+): void {
+  if (expected === undefined || health.config === undefined) return
+  if (resolve(health.config) !== resolve(expected)) {
+    throw new Error(
+      `a daemon is already running on ${endpoint} with a different config (${health.config}); stop it with \`daemon stop\` to use ${expected}`,
+    )
   }
 }
 

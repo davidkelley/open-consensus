@@ -24,6 +24,8 @@ let server: Server
 let endpoint: string
 /** PID the fake /health reports (so stop's identity check can match/mismatch). */
 let healthPid: number | undefined
+/** Config path the fake /health reports (so ensure's config check can mismatch). */
+let healthConfig: string | undefined
 const TOKEN = 'test-token'
 
 function isAliveForTest(pid: number | undefined): boolean {
@@ -45,7 +47,11 @@ function startFakeServer(): Promise<void> {
       res.end(JSON.stringify(body))
     }
     if (req.method === 'GET' && url === '/health') {
-      return send(200, { ok: true, ...(healthPid !== undefined ? { pid: healthPid } : {}) })
+      return send(200, {
+        ok: true,
+        ...(healthPid !== undefined ? { pid: healthPid } : {}),
+        ...(healthConfig !== undefined ? { config: healthConfig } : {}),
+      })
     }
     if (req.method === 'GET' && url === '/panels') {
       return send(200, { panels: [{ id: 'p', name: 'P', agentIds: ['a'], quorum: 1 }] })
@@ -86,6 +92,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'oc-daemon-'))
   discoveryPath = join(dir, 'discovery.json')
   healthPid = undefined
+  healthConfig = undefined
   await startFakeServer()
 })
 afterEach(() => {
@@ -198,6 +205,34 @@ describe('ensureDaemonRunning', () => {
     await expect(
       ensureDaemonRunning({ discoveryPath, launch: () => {}, attempts: 2, intervalMs: 1 }),
     ).rejects.toThrow(/did not become ready/)
+  })
+
+  it('reuses an existing daemon only when its config matches', async () => {
+    writeDiscovery({})
+    healthConfig = '/tmp/config-a.json'
+    // Matching config -> reuse without launching.
+    let launched = false
+    const d = await ensureDaemonRunning({
+      discoveryPath,
+      launch: () => {
+        launched = true
+      },
+      expectedConfigPath: '/tmp/config-a.json',
+    })
+    expect(d.endpoint).toBe(endpoint)
+    expect(launched).toBe(false)
+  })
+
+  it('refuses to reuse a daemon started with a different config', async () => {
+    writeDiscovery({})
+    healthConfig = '/tmp/config-a.json'
+    await expect(
+      ensureDaemonRunning({
+        discoveryPath,
+        launch: () => {},
+        expectedConfigPath: '/tmp/config-b.json',
+      }),
+    ).rejects.toThrow(/different config/)
   })
 })
 
