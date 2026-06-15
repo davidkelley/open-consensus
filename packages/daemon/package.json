@@ -13,6 +13,7 @@
     "@open-consensus/config": "*",
     "@open-consensus/core": "*",
     "@open-consensus/engine": "*",
-    "@open-consensus/proc": "*"
+    "@open-consensus/proc": "*",
+    "proper-lockfile": "^4.1.2"
   }
 }

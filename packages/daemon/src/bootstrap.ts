@@ -6,19 +6,13 @@ import { type AppPaths, appPaths } from '@open-consensus/core'
 import { EngineStore } from '@open-consensus/engine'
 import { daemonRequest } from './client'
 import { DaemonCore } from './daemon'
-import {
-  type Discovery,
-  type LockInfo,
-  acquireLock,
-  generateToken,
-  releaseLock,
-  writeDiscovery,
-} from './lifecycle'
+import { type Discovery, acquireLock, generateToken, writeDiscovery } from './lifecycle'
 import type { AdapterRegistry } from './resolver'
 import { DaemonServer, type ListenTarget } from './server'
 
 const SOCKET_NAME = 'd.sock'
-const LOCK_NAME = 'daemon.lock'
+// proper-lockfile manages `${LOCK_NAME}.lock`; using a bare name keeps it tidy.
+const LOCK_NAME = 'daemon'
 const DISCOVERY_NAME = 'discovery.json'
 const DB_NAME = 'engine.sqlite'
 const RAW_DIRNAME = 'raw'
@@ -78,8 +72,8 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
 
   const lockPath = join(paths.runtime, LOCK_NAME)
   const discoveryPath = join(paths.runtime, DISCOVERY_NAME)
-  const lockInfo: LockInfo = { pid: process.pid, startTime: Date.now() }
-  if (!acquireLock(lockPath, lockInfo)) throw new DaemonAlreadyRunningError()
+  const lock = acquireLock(lockPath)
+  if (!lock) throw new DaemonAlreadyRunningError()
 
   let store: EngineStore | undefined
   let server: DaemonServer | undefined
@@ -139,7 +133,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
         } finally {
           // Always release the lock, even if a cleanup step threw, so a restart
           // is never blocked by a strand.
-          releaseLock(lockPath, lockInfo)
+          lock.release()
         }
       },
     }
@@ -154,7 +148,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
     } catch {
       /* best-effort */
     } finally {
-      releaseLock(lockPath, lockInfo)
+      lock.release()
     }
     throw err
   }

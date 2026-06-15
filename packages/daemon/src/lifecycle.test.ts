@@ -1,73 +1,65 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
-  type LockInfo,
+  type DaemonLock,
   acquireLock,
   generateToken,
   readDiscovery,
-  releaseLock,
   writeDiscovery,
 } from './lifecycle'
-
-const DEAD_PID = 2_147_483_646 // out of range / never alive -> isAlive() false
 
 describe('lifecycle lock', () => {
   let dir: string
   let lockPath: string
-  const me: LockInfo = { pid: process.pid, startTime: 1000 }
+  let held: DaemonLock[]
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'oc-lock-'))
-    lockPath = join(dir, 'daemon.lock')
+    lockPath = join(dir, 'daemon')
+    held = []
   })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
-
-  it('acquires a free lock and records the owner (no temp left behind)', () => {
-    expect(acquireLock(lockPath, me)).toBe(true)
-    expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toEqual(me)
-    // The atomic temp+link must not leave a stray `.acquire-*` file.
-    expect(readdirSync(dir).filter((f) => f.includes('.acquire-'))).toEqual([])
+  afterEach(() => {
+    for (const l of held.splice(0)) l.release() // stop heartbeat timers
+    rmSync(dir, { recursive: true, force: true })
   })
 
-  it('refuses when a live owner holds it', () => {
-    expect(acquireLock(lockPath, me)).toBe(true)
-    expect(acquireLock(lockPath, { pid: process.pid, startTime: 2 })).toBe(false)
+  /** Acquire + track for release (so heartbeat timers don't outlive the test). */
+  function lock(opts?: { staleMs?: number }): DaemonLock | null {
+    const l = acquireLock(lockPath, opts)
+    if (l) held.push(l)
+    return l
+  }
+
+  it('acquires a free lock and refuses a second concurrent holder', () => {
+    expect(lock()).not.toBeNull()
+    expect(acquireLock(lockPath)).toBeNull() // second holder blocked (ELOCKED)
   })
 
-  it('reclaims a lock whose owner is dead, atomically and without leftovers', () => {
-    writeFileSync(lockPath, JSON.stringify({ pid: DEAD_PID, startTime: 1 }))
-    expect(acquireLock(lockPath, me)).toBe(true)
-    expect(JSON.parse(readFileSync(lockPath, 'utf8')).pid).toBe(process.pid)
-    // The temp + rename-claim reclaim must leave no `.acquire-*` / `.reclaim-*`.
-    expect(
-      readdirSync(dir).filter((f) => f.includes('.acquire-') || f.includes('.reclaim-')),
-    ).toEqual([])
+  it('releases the lock so it can be re-acquired', () => {
+    const a = acquireLock(lockPath)
+    expect(a).not.toBeNull()
+    a?.release()
+    expect(lock()).not.toBeNull()
   })
 
-  it('reclaims a corrupt lock file', () => {
-    writeFileSync(lockPath, 'not json at all')
-    expect(acquireLock(lockPath, me)).toBe(true)
+  it('release is idempotent and best-effort', () => {
+    const a = acquireLock(lockPath)
+    a?.release()
+    expect(() => a?.release()).not.toThrow()
   })
 
-  it('does not loop forever: a second reclaim pass gives up', () => {
-    // Directly exercising the reclaim guard: a corrupt/dead lock that still
-    // exists on the retry pass must return false rather than recurse again.
-    writeFileSync(lockPath, JSON.stringify({ pid: DEAD_PID, startTime: 1 }))
-    expect(acquireLock(lockPath, me, /* reclaimed */ true)).toBe(false)
+  it('reclaims a lock whose owner crashed (heartbeat went stale)', () => {
+    expect(lock({ staleMs: 5000 })).not.toBeNull()
+    // Simulate a crashed owner: backdate the lock dir's mtime past the window.
+    const past = new Date(Date.now() - 60_000)
+    utimesSync(`${lockPath}.lock`, past, past)
+    expect(lock({ staleMs: 5000 })).not.toBeNull() // proper-lockfile reclaims it
   })
 
-  it('releases only when still the owner', () => {
-    expect(acquireLock(lockPath, me)).toBe(true)
-    releaseLock(lockPath, { pid: process.pid, startTime: 999 }) // wrong startTime -> not owner
-    expect(() => readFileSync(lockPath, 'utf8')).not.toThrow()
-    releaseLock(lockPath, me)
-    expect(() => readFileSync(lockPath, 'utf8')).toThrow()
-  })
-
-  it('releaseLock on a missing file is a no-op', () => {
-    expect(() => releaseLock(lockPath, me)).not.toThrow()
+  it('propagates a non-ELOCKED failure (e.g. a missing parent dir)', () => {
+    expect(() => acquireLock(join(dir, 'no-such-subdir', 'daemon'))).toThrow()
   })
 })
 

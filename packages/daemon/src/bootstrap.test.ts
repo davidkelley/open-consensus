@@ -129,9 +129,9 @@ describe('startDaemon lifecycle', () => {
       startDaemon({ adapters: registry, config, paths, loopback: true }),
     ).rejects.toBeDefined()
     // The lock was released by the rollback, so a fresh acquire succeeds.
-    expect(
-      acquireLock(join(paths.runtime, 'daemon.lock'), { pid: process.pid, startTime: 1 }),
-    ).toBe(true)
+    const relock = acquireLock(join(paths.runtime, 'daemon'))
+    expect(relock).not.toBeNull()
+    relock?.release()
     expect(readDiscovery(join(paths.runtime, 'discovery.json'))).toBeUndefined()
   })
 

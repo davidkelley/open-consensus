@@ -1,99 +1,57 @@
 import { randomBytes } from 'node:crypto'
-import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { lockSync } from 'proper-lockfile'
 
 /**
- * Daemon lifecycle primitives (plan D2/D14): an atomic single-instance lock and
- * an endpoint discovery file. Kept dependency-free — acquisition is a temp-file
- * write + atomic `link()` (so a racer never sees a partial file), and a stale
- * lock (dead PID) is reclaimed by an atomic `rename()` claim so two racers can
- * never both reclaim it. Staleness is decided by PID liveness.
+ * Daemon lifecycle primitives (plan D2/D14): a single-instance lock and an
+ * endpoint discovery file. The lock delegates to **proper-lockfile** — the same
+ * battle-tested mkdir + mtime-heartbeat protocol npm uses — rather than a
+ * hand-rolled PID-liveness lock, because POSIX has no atomic compare-and-replace
+ * and every hand-rolled stale-reclaim scheme has a split-brain reclaim race. A
+ * crashed owner's lock goes stale (its mtime heartbeat stops) and is reclaimed
+ * automatically after `staleMs`; while the owner lives it heartbeats to stay
+ * fresh. The release handle stops the heartbeat and removes the lock.
  */
 
-export interface LockInfo {
-  pid: number
-  /** Process start time (ms) — distinguishes a live owner from a recycled PID. */
-  startTime: number
+/** Default ms before a crashed owner's lock is reclaimable (mtime staleness). */
+const DEFAULT_STALE_MS = 10_000
+
+export interface DaemonLock {
+  /** Release the lock + stop its heartbeat (idempotent, best-effort). */
+  release(): void
 }
 
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function readLock(lockPath: string): LockInfo | undefined {
-  try {
-    const parsed = JSON.parse(readFileSync(lockPath, 'utf8')) as Partial<LockInfo>
-    if (typeof parsed.pid === 'number' && typeof parsed.startTime === 'number') {
-      return { pid: parsed.pid, startTime: parsed.startTime }
-    }
-  } catch {
-    /* missing or corrupt -> treat as no valid lock */
-  }
-  return undefined
+export interface AcquireLockOptions {
+  /** Override the staleness window (tests use a short one). */
+  staleMs?: number
 }
 
 /**
- * Acquire the singleton lock atomically. Returns true on success. If a LIVE
- * owner holds it, returns false. A stale lock (dead PID, or unreadable) is
- * reclaimed and retried once.
+ * Acquire the single-instance lock (D14). Returns a {@link DaemonLock} on
+ * success, or `null` if another LIVE daemon holds it (ELOCKED). Other errors
+ * (e.g. a missing parent dir) propagate.
  */
-export function acquireLock(lockPath: string, info: LockInfo, reclaimed = false): boolean {
-  // Write the content to a private temp file, then hard-link it into place.
-  // link() is atomic and fails EEXIST if the lock already exists — so a concurrent
-  // starter that loses the race always observes a COMPLETE lock file, never an
-  // empty/partial one. (An `openSync('wx')` then write exposes a window where the
-  // file exists but is still empty, which would let two daemons both reclaim it —
-  // the exact split-brain D14 forbids.)
-  const tmp = `${lockPath}.acquire-${randomBytes(6).toString('hex')}`
+export function acquireLock(lockPath: string, options: AcquireLockOptions = {}): DaemonLock | null {
   try {
-    writeFileSync(tmp, JSON.stringify(info), { mode: 0o600 })
-    linkSync(tmp, lockPath)
-    return true
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-    if (reclaimed) return false // already tried once; avoid a reclaim loop
-    const existing = readLock(lockPath)
-    if (existing && isAlive(existing.pid)) return false // a clearly-live owner
-    // Stale (or corrupt) lock. Reclaim it ATOMICALLY: rename it aside. Only one
-    // racer can rename a given path — the rest get ENOENT and restart — so two
-    // daemons can never both reclaim and both `link` (a plain rmSync+link would
-    // let a second reclaimer delete the first's freshly-acquired lock: D14).
-    const claim = `${lockPath}.reclaim-${randomBytes(6).toString('hex')}`
-    try {
-      renameSync(lockPath, claim)
-    } catch {
-      return acquireLock(lockPath, info, false) // lost the claim race; start over
-    }
-    try {
-      // Re-check what we actually moved: if a fresh LIVE lock slipped in between
-      // the read and the rename, restore it rather than steal it.
-      const moved = readLock(claim)
-      if (moved && isAlive(moved.pid)) {
+    const release = lockSync(lockPath, {
+      realpath: false, // the lock path itself need not exist; we lock the name
+      stale: options.staleMs ?? DEFAULT_STALE_MS,
+      // A compromised lock (e.g. its dir deleted out from under us) must not crash
+      // the daemon via an uncaught throw from the heartbeat timer.
+      onCompromised: () => {},
+    })
+    return {
+      release: () => {
         try {
-          linkSync(claim, lockPath)
+          release()
         } catch {
-          /* a newer lock already exists — leave it */
+          /* already released / compromised — nothing to do */
         }
-        return false
-      }
-      return acquireLock(lockPath, info, true) // lockPath is free; we hold `claim`
-    } finally {
-      rmSync(claim, { force: true })
+      },
     }
-  } finally {
-    rmSync(tmp, { force: true })
-  }
-}
-
-/** Release the lock only if we still own it (best-effort). */
-export function releaseLock(lockPath: string, info: LockInfo): void {
-  const existing = readLock(lockPath)
-  if (existing && existing.pid === info.pid && existing.startTime === info.startTime) {
-    rmSync(lockPath, { force: true })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ELOCKED') return null
+    throw err
   }
 }
 
