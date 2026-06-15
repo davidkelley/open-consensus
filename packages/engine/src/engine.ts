@@ -195,9 +195,11 @@ export class Engine {
   /**
    * Re-adopt a parked run (D14): flip `abandoned` back to `running` so a returning
    * orchestrator can continue it with a new round. Durable + observable via the
-   * `run-readopted` event. No-op if the run isn't abandoned.
+   * `run-readopted` event. A genuine no-op (no write, no event) if the run isn't
+   * abandoned, so a caller can invoke it unconditionally.
    */
   readoptRun(runId: string): void {
+    if (this.store.getRun(runId)?.state !== 'abandoned') return
     this.persistWith(runId, () => this.store.setRunState(runId, 'running'), {
       type: 'run-readopted',
       runId,
