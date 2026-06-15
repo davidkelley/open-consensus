@@ -14,7 +14,12 @@ export interface ProcessSpec {
   args?: string[]
   /** Working directory — the engine passes an ephemeral scratch dir (D20). */
   cwd?: string
-  /** Child environment. The caller composes this (adapter env allowlist, D8). */
+  /**
+   * Child environment. The runner passes ONLY this (plus the sentinel) — the
+   * inherited env is intentionally dropped (D8/D20). The caller MUST therefore
+   * compose a usable env, including a sanitized `PATH` (and `SystemRoot` on
+   * Windows), or the child won't be able to resolve any binary it shells out to.
+   */
   env?: Record<string, string>
   /** Prompt delivered on stdin (preferred over argv; plan D5). */
   stdin?: string
@@ -23,7 +28,10 @@ export interface ProcessSpec {
 export interface RunOptions {
   /** Per-invocation timeout; on expiry the whole tree is killed. */
   timeoutMs: number
-  /** Byte cap on each captured stream; exceeding it tree-kills the child. */
+  /**
+   * Byte cap on EACH captured stream; exceeding it tree-kills the child. Peak
+   * in-memory capture is therefore up to ~2x this value (stdout + stderr).
+   */
   maxOutputBytes: number
   /** Cancellation — abort tree-kills the child. */
   signal?: AbortSignal
@@ -31,7 +39,11 @@ export interface RunOptions {
   terminator?: ProcessTerminator
   /** Daemon id stamped into the child env for the orphan sweep. */
   daemonId?: string
-  /** Receives every raw chunk before cleaning (the engine spills it to disk). */
+  /**
+   * Receives every RAW chunk (pre-clean) so the engine can spill it to disk.
+   * Chunks are raw bytes: a multi-byte UTF-8 codepoint may split across two
+   * chunks, so callers MUST concatenate (or use a StringDecoder) before decoding.
+   */
   onRaw?: (stream: 'stdout' | 'stderr', chunk: Buffer) => void
 }
 
@@ -101,6 +113,12 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
       })
     }
 
+    // A pre-cancelled invocation must never launch the process (no spend, D20).
+    if (options.signal?.aborted) {
+      finish('cancelled', null, null)
+      return
+    }
+
     let child: ReturnType<typeof spawn>
     try {
       child = spawn(spec.file, spec.args ?? [], {
@@ -109,6 +127,7 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true, // own process group, so we can reap the whole tree
         shell: false,
+        windowsHide: true,
       })
     } catch (err) {
       finish('spawn-error', null, null, (err as Error).message)
@@ -120,12 +139,23 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     const killTree = (): void => {
       if (killing || pid === undefined) return
       killing = true
-      void terminator.terminate(pid)
+      void terminator.terminate(pid).catch(() => {})
+      // Defensive: if an orphaned grandchild keeps our stdio pipes open, 'close'
+      // may never fire — resolve anyway after a bounded grace.
+      const fallback = setTimeout(() => finish(outcome, null, 'SIGKILL'), 8000)
+      fallback.unref()
+      cleanups.push(() => clearTimeout(fallback))
+    }
+
+    // First terminal kill reason wins (a later timeout must not mask an
+    // already-recorded output-overflow, and vice versa).
+    const requestKill = (reason: RunOutcome): void => {
+      if (!killing) outcome = reason
+      killTree()
     }
 
     function onAbort(): void {
-      outcome = 'cancelled'
-      killTree()
+      requestKill('cancelled')
     }
 
     const collect = (name: 'stdout' | 'stderr', chunk: Buffer): void => {
@@ -137,8 +167,7 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
         s.chunks.push(chunk.subarray(0, remaining))
         s.bytes = options.maxOutputBytes
         truncated = true
-        outcome = 'output-overflow'
-        killTree()
+        requestKill('output-overflow')
       } else {
         s.chunks.push(chunk)
         s.bytes += chunk.length
@@ -154,10 +183,7 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     child.stdin?.on('error', () => {})
     child.stdin?.end(spec.stdin ?? '')
 
-    const timer = setTimeout(() => {
-      outcome = 'timeout'
-      killTree()
-    }, options.timeoutMs)
+    const timer = setTimeout(() => requestKill('timeout'), options.timeoutMs)
     cleanups.push(() => clearTimeout(timer))
 
     const { signal } = options

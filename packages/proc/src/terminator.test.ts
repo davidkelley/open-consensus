@@ -69,6 +69,30 @@ describe('posix terminator', () => {
     await createPosixTerminator().terminate(pid, { graceMs: 1500 })
     expect(await waitGone(pid)).toBe(true)
   })
+
+  it('SIGKILLs the GROUP when the leader exits but a grandchild ignores SIGTERM', async () => {
+    // Leader spawns a SIGTERM-ignoring grandchild (same group), prints its pid,
+    // then exits cooperatively on SIGTERM. The leader dies but the group must
+    // still be SIGKILLed so the grandchild is reaped.
+    const leaderCode = [
+      'const { spawn } = require("node:child_process");',
+      'const gc = spawn(process.execPath, ["-e", "process.on(\'SIGTERM\',()=>{});setTimeout(()=>{},60000)"], { stdio: "ignore" });',
+      'process.stdout.write(String(gc.pid));',
+      'process.on("SIGTERM", () => process.exit(0));',
+      'setTimeout(() => {}, 60000);',
+    ].join('')
+    const leader = spawn(process.execPath, ['-e', leaderCode], {
+      detached: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    const pid = leader.pid as number
+    const gcPid = await new Promise<number>((resolve) => {
+      leader.stdout?.on('data', (d: Buffer) => resolve(Number(d.toString('utf8').trim())))
+    })
+    await createPosixTerminator().terminate(pid, { graceMs: 200 })
+    expect(await waitGone(pid)).toBe(true)
+    expect(await waitGone(gcPid)).toBe(true)
+  })
 })
 
 describe('windows terminator (fake spawn)', () => {

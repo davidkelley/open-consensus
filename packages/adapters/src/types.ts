@@ -27,7 +27,7 @@ export interface DetectResult {
   reason?: string
 }
 
-/** Per-invocation inputs the engine hands to `buildInvocation`. */
+/** Per-invocation inputs the engine hands to `buildInvocation` / `parse`. */
 export interface AdapterInvocationContext {
   /** Fully-composed prompt for this round (D5). */
   prompt: string
@@ -35,10 +35,24 @@ export interface AdapterInvocationContext {
   model?: string
   /** Extra CLI args from the agent config. */
   args?: string[]
-  /** Composed child environment (allowlisted by the engine, D8). */
+  /**
+   * Composed child environment. The engine builds this with an allowlist plus a
+   * sanitized `PATH` (and `SystemRoot` on Windows), because the runner passes
+   * ONLY this env to the child — the inherited env is dropped (D8/D20).
+   */
   env?: Record<string, string>
   /** Ephemeral scratch working directory (D20). */
   cwd: string
+  /** Session mode — v1 is always `stateless`; carried for future resume (D5). */
+  sessionMode?: 'stateless' | 'resume'
+  /** Per-adapter session id (resume mode; unused in v1). */
+  sessionId?: string
+  /**
+   * Engine-allocated writable scratch path the adapter MAY reference in argv for
+   * temp-file prompt delivery (D10). The engine writes the prompt (`0600`) and
+   * cleans it up; the adapter only formats the path into its arguments.
+   */
+  promptFile?: string
 }
 
 /** A runnable invocation. Mirrors the proc `ProcessSpec` plus prompt delivery. */
@@ -71,6 +85,10 @@ export interface Adapter {
   detect(): Promise<DetectResult>
   /** Compose a safe, runnable invocation for one prompt. */
   buildInvocation(ctx: AdapterInvocationContext): AdapterInvocation
-  /** Classify the finished run into ok / refusal / error + distilled text. */
-  parse(result: RunResult): AdapterParseResult
+  /**
+   * Classify the finished run into ok / refusal / error + distilled text. Gets
+   * the invocation context too, so an adapter can use the original prompt /
+   * model / structured-output expectations to interpret the result.
+   */
+  parse(result: RunResult, ctx: AdapterInvocationContext): AdapterParseResult
 }

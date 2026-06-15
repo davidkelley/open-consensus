@@ -53,9 +53,11 @@ export function createMockAdapter(options: MockAdapterOptions = {}): Adapter {
     },
     detect: () => Promise.resolve({ available: true, version: process.version }),
     buildInvocation(ctx: AdapterInvocationContext): AdapterInvocation {
-      // The mode may be overridden per-invocation via ctx.model (handy for
-      // configuring different agents to different mock behaviours in one panel).
-      const mode = MODES.has(ctx.model ?? '') ? (ctx.model as MockMode) : defaultMode
+      // The mode may be overridden per-invocation via a NAMESPACED model string
+      // ('mock:error' etc.), so a real model name like 'opus' is never mistaken
+      // for a mock mode.
+      const override = ctx.model?.startsWith('mock:') ? ctx.model.slice('mock:'.length) : undefined
+      const mode = override && MODES.has(override) ? (override as MockMode) : defaultMode
       return {
         file: process.execPath,
         args: ['-e', MOCK_SCRIPT, mode, String(options.slowMs ?? 300)],
@@ -63,7 +65,7 @@ export function createMockAdapter(options: MockAdapterOptions = {}): Adapter {
         stdin: ctx.prompt,
       }
     },
-    parse(result: RunResult): AdapterParseResult {
+    parse(result: RunResult, _ctx: AdapterInvocationContext): AdapterParseResult {
       switch (result.outcome) {
         case 'timeout':
           return { status: 'error', text: '', errorClass: 'timeout' }

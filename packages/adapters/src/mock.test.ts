@@ -8,12 +8,13 @@ async function drive(
   ctx: Partial<AdapterInvocationContext> = {},
   timeoutMs = 3000,
 ) {
-  const invocation = adapter.buildInvocation({ prompt: 'hi', cwd: process.cwd(), ...ctx })
+  const context: AdapterInvocationContext = { prompt: 'hi', cwd: process.cwd(), ...ctx }
+  const invocation = adapter.buildInvocation(context)
   const result = await runProcess(
     { file: invocation.file, args: invocation.args, env: invocation.env, stdin: invocation.stdin },
     { timeoutMs, maxOutputBytes: 1 << 20 },
   )
-  return adapter.parse(result)
+  return adapter.parse(result, context)
 }
 
 describe('mock adapter (driven through the real runner)', () => {
@@ -45,12 +46,18 @@ describe('mock adapter (driven through the real runner)', () => {
     expect(r).toEqual({ status: 'ok', text: 'slow:x' })
   })
 
-  it('mode can be overridden per-invocation via ctx.model', async () => {
-    expect((await drive(mockAdapter, { model: 'refusal' })).status).toBe('refusal')
+  it('mode can be overridden per-invocation via a namespaced model string', async () => {
+    expect((await drive(mockAdapter, { model: 'mock:refusal' })).status).toBe('refusal')
+  })
+
+  it('a real (non-namespaced) model name does NOT select a mock mode', async () => {
+    // 'error' as a plain model name must not trigger the error mode.
+    expect((await drive(mockAdapter, { model: 'error', prompt: 'p' })).status).toBe('ok')
   })
 })
 
 describe('mock parse classification (unit)', () => {
+  const ctx: AdapterInvocationContext = { prompt: 'p', cwd: process.cwd() }
   const base: RunResult = {
     outcome: 'exited',
     exitCode: 0,
@@ -62,15 +69,16 @@ describe('mock parse classification (unit)', () => {
   }
 
   it('maps every non-ok runner outcome', () => {
-    expect(mockAdapter.parse({ ...base, outcome: 'cancelled' }).errorClass).toBe('cancelled')
-    expect(mockAdapter.parse({ ...base, outcome: 'output-overflow', stdout: 'x' })).toMatchObject({
-      status: 'error',
-      errorClass: 'output-overflow',
-    })
-    expect(mockAdapter.parse({ ...base, outcome: 'spawn-error', error: 'boom' }).errorClass).toBe(
-      'boom',
+    expect(mockAdapter.parse({ ...base, outcome: 'cancelled' }, ctx).errorClass).toBe('cancelled')
+    expect(
+      mockAdapter.parse({ ...base, outcome: 'output-overflow', stdout: 'x' }, ctx),
+    ).toMatchObject({ status: 'error', errorClass: 'output-overflow' })
+    expect(
+      mockAdapter.parse({ ...base, outcome: 'spawn-error', error: 'boom' }, ctx).errorClass,
+    ).toBe('boom')
+    expect(mockAdapter.parse({ ...base, outcome: 'spawn-error' }, ctx).errorClass).toBe(
+      'spawn-error',
     )
-    expect(mockAdapter.parse({ ...base, outcome: 'spawn-error' }).errorClass).toBe('spawn-error')
-    expect(mockAdapter.parse({ ...base, stdout: 'not json' }).errorClass).toBe('unparseable')
+    expect(mockAdapter.parse({ ...base, stdout: 'not json' }, ctx).errorClass).toBe('unparseable')
   })
 })
