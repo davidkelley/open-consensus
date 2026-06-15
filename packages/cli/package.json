@@ -12,6 +12,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage"
   },
+  "dependencies": {
+    "@open-consensus/config": "*",
+    "@open-consensus/core": "*",
+    "commander": "^12.1.0"
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.1.8",
     "vitest": "^2.1.8"
