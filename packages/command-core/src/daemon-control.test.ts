@@ -286,6 +286,20 @@ describe('stopDaemonCommand', () => {
     child.kill('SIGKILL')
   })
 
+  it('refuses to signal when /health does not report a pid at all', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
+    await new Promise((r) => setTimeout(r, 50))
+    healthPid = undefined // a 200 with no pid -> identity unconfirmable -> do not signal
+    writeDiscovery({ pid: child.pid })
+    const result = await stopDaemonCommand(discoveryPath)
+    expect(result).toMatchObject({
+      stopped: false,
+      reason: expect.stringMatching(/did not report a pid/),
+    })
+    expect(isAliveForTest(child.pid)).toBe(true)
+    child.kill('SIGKILL')
+  })
+
   it('refuses to signal a PID when the endpoint is not responding (stale/reused)', async () => {
     // Live, signalable process, but the discovery endpoint is dead -> we must NOT
     // signal it (it could be a recycled PID owned by something unrelated).

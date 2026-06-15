@@ -17,6 +17,7 @@ let out: string[]
 let err: string[]
 let server: Server
 let endpoint: string
+let healthPid: number | undefined
 let deps: CliDeps
 
 /** Registry: claude available (fake), gemini missing, opencode available+unsandboxed. */
@@ -36,7 +37,9 @@ function startServer(): Promise<void> {
       res.writeHead(status, { 'content-type': 'application/json' })
       res.end(JSON.stringify(body))
     }
-    if (url === '/health') return send(200, { ok: true })
+    if (url === '/health') {
+      return send(200, { ok: true, ...(healthPid !== undefined ? { pid: healthPid } : {}) })
+    }
     if (req.method === 'POST' && url === '/runs') return send(200, { runId: 'r1', roundId: 'rd1' })
     if (url === '/runs/r1/status') {
       return send(200, {
@@ -83,6 +86,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'oc-cli-'))
   out = []
   err = []
+  healthPid = undefined
   await startServer()
   deps = {
     configFile: join(dir, 'config.json'),
@@ -311,6 +315,7 @@ describe('daemon commands', () => {
   it('stop signals the serve process and reports success', async () => {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
     await new Promise((r) => setTimeout(r, 50))
+    healthPid = child.pid // /health confirms the discovery pid is the live daemon
     writeFileSync(deps.discoveryPath, JSON.stringify({ endpoint, token: 't', pid: child.pid }))
     await run(argv('daemon', 'stop'), deps)
     expect(out.join('\n')).toMatch(new RegExp(`daemon stopped \\(pid ${child.pid}\\)`))

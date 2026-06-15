@@ -351,11 +351,17 @@ export async function stopDaemonCommand(
       reason: `daemon at ${discovery.endpoint} is not responding — the discovery file is likely stale. Not signalling pid ${pid} (it may have been reused by an unrelated process). ${stale}`,
     }
   }
-  if (typeof health.pid === 'number' && health.pid !== pid) {
+  // REQUIRE a matching pid: our daemon's /health always reports its pid, so an
+  // absent or differing pid means the responder isn't the process discovery
+  // names — refuse to signal it (closes the PID-reuse hole entirely).
+  if (health.pid !== pid) {
     return {
       stopped: false,
       pid,
-      reason: `the daemon answering ${discovery.endpoint} reports pid ${health.pid}, not ${pid} — discovery is stale. ${stale}`,
+      reason:
+        health.pid === undefined
+          ? `the daemon at ${discovery.endpoint} did not report a pid; cannot confirm pid ${pid} is the live daemon — discovery may be stale. ${stale}`
+          : `the daemon answering ${discovery.endpoint} reports pid ${health.pid}, not ${pid} — discovery is stale. ${stale}`,
     }
   }
   try {
