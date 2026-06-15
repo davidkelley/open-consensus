@@ -149,22 +149,46 @@ export class DaemonCore {
   startRun(
     panelId: string,
     prompt: string,
+    idempotencyKey?: string,
   ): { runId: string; roundId: string } | { error: string } {
+    // Durable dedup (D12): a replayed call with the same key returns the original
+    // run/round (a still-in-flight one is fine — the caller just polls it).
+    if (idempotencyKey) {
+      const existing = this.store.getIdempotent(idempotencyKey)
+      if (existing && this.store.getRun(existing.runId)) {
+        this.touch(existing.runId)
+        return { runId: existing.runId, roundId: existing.roundId }
+      }
+    }
     const panel = resolvePanel(this.config, this.adapters, panelId)
     if (!panel) return { error: `unknown panel '${panelId}'` }
     if (panel.agents.length === 0) return { error: `panel '${panelId}' has no resolvable agents` }
     const run = this.engine.createRun(panelId)
     const roundId = this.beginRound(run, panel, prompt)
+    if (idempotencyKey) this.store.recordIdempotent(idempotencyKey, run.runId, roundId)
     return { runId: run.runId, roundId }
   }
 
-  startRound(runId: string, prompt: string): { roundId: string } | { error: string } {
+  startRound(
+    runId: string,
+    prompt: string,
+    idempotencyKey?: string,
+  ): { roundId: string } | { error: string } {
     const run = this.store.getRun(runId)
     if (!run) return { error: `unknown run '${runId}'` }
     if (run.state !== 'running') return { error: `run '${runId}' is ${run.state}` }
+    // Dedup scoped to (runId, key) — a replayed round returns the original (D12).
+    if (idempotencyKey) {
+      const existing = this.store.getIdempotent(idempotencyKey)
+      if (existing && existing.runId === runId) {
+        this.touch(runId)
+        return { roundId: existing.roundId }
+      }
+    }
     const panel = resolvePanel(this.config, this.adapters, run.panelId)
     if (!panel) return { error: `panel '${run.panelId}' is no longer resolvable` }
     const roundId = this.beginRound(run, panel, prompt)
+    if (idempotencyKey) this.store.recordIdempotent(idempotencyKey, runId, roundId)
     return { roundId }
   }
 

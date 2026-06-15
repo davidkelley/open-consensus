@@ -12,6 +12,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage"
   },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@open-consensus/core": "*",
+    "@open-consensus/daemon": "*",
+    "@open-consensus/engine": "*",
+    "zod": "^3.24.1"
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.1.8",
     "vitest": "^2.1.8"

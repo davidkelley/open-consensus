@@ -290,7 +290,7 @@ export class DaemonServer {
   private async handleStartRun(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await this.parseBody(req, res, startRunBodySchema)
     if (!body) return
-    const result = this.core.startRun(body.panel, body.prompt)
+    const result = this.core.startRun(body.panel, body.prompt, body.idempotencyKey)
     if ('error' in result) return sendError(res, 400, result.error)
     sendJson(res, 200, result)
   }
@@ -302,7 +302,7 @@ export class DaemonServer {
   ): Promise<void> {
     const body = await this.parseBody(req, res, startRoundBodySchema)
     if (!body) return
-    const result = this.core.startRound(runId, body.prompt)
+    const result = this.core.startRound(runId, body.prompt, body.idempotencyKey)
     if ('error' in result) return sendError(res, 400, result.error)
     sendJson(res, 200, result)
   }

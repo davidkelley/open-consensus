@@ -155,6 +155,29 @@ describe('EngineStore', () => {
     expect(store.latestRound('missing')).toBeUndefined()
   })
 
+  it('records idempotency keys, dedups replays, and prunes them with the run', () => {
+    store.createRun(run())
+    startRound(store)
+    expect(store.getIdempotent('k1')).toBeUndefined()
+    store.recordIdempotent('k1', 'run1', 'rd1')
+    store.recordIdempotent('k1', 'run1', 'other') // first writer wins
+    expect(store.getIdempotent('k1')).toEqual({ runId: 'run1', roundId: 'rd1' })
+    // FK ON DELETE CASCADE: pruning the run drops its idempotency rows too (D16).
+    store.pruneRun('run1')
+    expect(store.getIdempotent('k1')).toBeUndefined()
+  })
+
+  it('migrates an older database forward to the current schema on reopen', () => {
+    const dbPath = join(dir, 'older.sqlite')
+    const s1 = new EngineStore({ dbPath, rawDir: join(dir, 'rawo') })
+    s1.createRun(run('r'))
+    s1.recordIdempotent('k', 'r', 'rd') // requires the v3 idempotency table
+    s1.close()
+    const s2 = new EngineStore({ dbPath, rawDir: join(dir, 'rawo') })
+    expect(s2.getIdempotent('k')).toEqual({ runId: 'r', roundId: 'rd' })
+    s2.close()
+  })
+
   it('appends events with a monotonic sequence', () => {
     const s1 = store.appendEvent('run1', '{"type":"x"}')
     expect(store.appendEvent('run1', '{"type":"y"}')).toBe(s1 + 1)

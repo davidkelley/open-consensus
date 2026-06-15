@@ -7,13 +7,20 @@ import { z } from 'zod'
  */
 
 const promptSchema = z.string().min(1, 'prompt is required').max(1_000_000)
+const idempotencyKeySchema = z.string().min(1).max(200).optional()
 
 export const startRunBodySchema = z
-  .object({ panel: z.string().min(1).max(64), prompt: promptSchema })
+  .object({
+    panel: z.string().min(1).max(64),
+    prompt: promptSchema,
+    idempotencyKey: idempotencyKeySchema,
+  })
   .strict()
 export type StartRunBody = z.infer<typeof startRunBodySchema>
 
-export const startRoundBodySchema = z.object({ prompt: promptSchema }).strict()
+export const startRoundBodySchema = z
+  .object({ prompt: promptSchema, idempotencyKey: idempotencyKeySchema })
+  .strict()
 export type StartRoundBody = z.infer<typeof startRoundBodySchema>
 
 /** Clamp a client-supplied long-poll wait to the daemon ceiling (D4). */

@@ -75,6 +75,40 @@ describe('DaemonCore runs', () => {
     expect(await h.core.waitRound('some-other-run', started.roundId)).toBeUndefined()
   })
 
+  it('dedups a replayed start/round by idempotency key (D12)', async () => {
+    const first = h.core.startRun('p-ok', 'task', 'key-1')
+    if (!('runId' in first)) throw new Error('start failed')
+    // A replay with the same key returns the ORIGINAL run/round, not a new one.
+    expect(h.core.startRun('p-ok', 'different prompt', 'key-1')).toEqual(first)
+    await h.core.drain()
+
+    const r2 = h.core.startRound(first.runId, 'round two', 'key-2')
+    if (!('roundId' in r2)) throw new Error('round failed')
+    expect(h.core.startRound(first.runId, 'whatever', 'key-2')).toEqual(r2)
+    // The same key is scoped to its run: it does not match a different run.
+    expect(h.core.startRound('other-run', 'x', 'key-2')).toEqual({
+      error: "unknown run 'other-run'",
+    })
+    await h.core.drain()
+  })
+
+  it('dedups a replayed start by idempotency key across a daemon restart (D12)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-idem-'))
+    const dbPath = join(dir, 'db.sqlite')
+    const s1 = new EngineStore({ dbPath, rawDir: join(dir, 'raw') })
+    const c1 = new DaemonCore({ store: s1, config, adapters: registry, maxWaitMs: 5000 })
+    const first = c1.startRun('p-ok', 'task', 'durable-key')
+    if (!('runId' in first)) throw new Error('start failed')
+    await c1.drain()
+    s1.close()
+    // "Restart": a fresh store + core over the same on-disk DB.
+    const s2 = new EngineStore({ dbPath, rawDir: join(dir, 'raw') })
+    const c2 = new DaemonCore({ store: s2, config, adapters: registry })
+    expect(c2.startRun('p-ok', 'ignored prompt', 'durable-key')).toEqual(first)
+    s2.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('rejects an unknown panel and a panel with no resolvable agents', () => {
     expect(h.core.startRun('nope', 'x')).toEqual({ error: "unknown panel 'nope'" })
     expect(h.core.startRun('p-empty', 'x')).toEqual({

@@ -10,7 +10,7 @@ import {
   computeVerdict,
 } from './model'
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 export interface StoreOptions {
   /** SQLite file path (`:memory:` for tests). */
@@ -119,6 +119,18 @@ export class EngineStore {
             daemonId TEXT NOT NULL
           );
           CREATE INDEX IF NOT EXISTS pgids_daemonId ON pgids(daemonId);
+        `)
+      }
+      if (current < 3) {
+        // Durable idempotency keys (D12): a replayed consensus_start/round returns
+        // the original run/round. FK cascade prunes a run's keys with it (D16).
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS idempotency (
+            key TEXT PRIMARY KEY,
+            runId TEXT NOT NULL,
+            roundId TEXT NOT NULL,
+            FOREIGN KEY (runId) REFERENCES runs(runId) ON DELETE CASCADE
+          );
         `)
       }
       this.db.pragma(`user_version = ${SCHEMA_VERSION}`)
@@ -248,6 +260,22 @@ export class EngineStore {
   /** Drop all entries not owned by the current daemon (after sweeping them). */
   clearForeignPgids(currentDaemonId: string): void {
     this.db.prepare('DELETE FROM pgids WHERE daemonId != ?').run(currentDaemonId)
+  }
+
+  // -- idempotency (plan D12) --------------------------------------------
+
+  /** Look up the run/round a prior call with this key created (replay dedup). */
+  getIdempotent(key: string): { runId: string; roundId: string } | undefined {
+    return this.db.prepare('SELECT runId, roundId FROM idempotency WHERE key = ?').get(key) as
+      | { runId: string; roundId: string }
+      | undefined
+  }
+
+  /** Record a key -> (run, round) mapping. First writer wins (OR IGNORE). */
+  recordIdempotent(key: string, runId: string, roundId: string): void {
+    this.db
+      .prepare('INSERT OR IGNORE INTO idempotency (key, runId, roundId) VALUES (?, ?, ?)')
+      .run(key, runId, roundId)
   }
 
   // -- raw blobs ----------------------------------------------------------
