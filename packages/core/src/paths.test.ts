@@ -35,14 +35,28 @@ describe('paths', () => {
     expect(configDir(env)).toBe('/home/tester/.config/open-consensus')
   })
 
-  it('runtimeDir falls back to the OS temp dir when XDG_RUNTIME_DIR is unset', () => {
-    expect(runtimeDir({ HOME })).toBe(join(tmpdir(), 'open-consensus'))
-  })
-
-  it('falls back to os.homedir() when HOME is empty or absent', () => {
+  it('falls back to os.homedir() when HOME is empty, absent, or relative', () => {
     const expected = join(homedir(), '.config', 'open-consensus')
     expect(configDir({ HOME: '' })).toBe(expected)
     expect(configDir({})).toBe(expected)
+    expect(configDir({ HOME: 'not/absolute' })).toBe(expected)
+  })
+
+  it('runtimeDir uses XDG_RUNTIME_DIR when absolute, regardless of platform', () => {
+    expect(runtimeDir({ XDG_RUNTIME_DIR: '/run/user/1000' }, 'linux')).toBe(
+      '/run/user/1000/open-consensus',
+    )
+    expect(runtimeDir({ XDG_RUNTIME_DIR: '/run/user/1000' }, 'darwin')).toBe(
+      '/run/user/1000/open-consensus',
+    )
+  })
+
+  it('runtimeDir falls back to a short /tmp on macOS (sun_path limit, D2)', () => {
+    expect(runtimeDir({ HOME }, 'darwin')).toBe('/tmp/open-consensus')
+  })
+
+  it('runtimeDir falls back to os.tmpdir() off macOS', () => {
+    expect(runtimeDir({ HOME }, 'linux')).toBe(join(tmpdir(), 'open-consensus'))
   })
 
   it('reads process.env when no env is supplied', () => {
@@ -53,12 +67,16 @@ describe('paths', () => {
 
   it('appPaths resolves every directory at once', () => {
     const env: PathEnv = { HOME }
+    const expectedRuntime = join(
+      process.platform === 'darwin' ? '/tmp' : tmpdir(),
+      'open-consensus',
+    )
     expect(appPaths(env)).toEqual({
       config: '/home/tester/.config/open-consensus',
       state: '/home/tester/.local/state/open-consensus',
       data: '/home/tester/.local/share/open-consensus',
       cache: '/home/tester/.cache/open-consensus',
-      runtime: join(tmpdir(), 'open-consensus'),
+      runtime: expectedRuntime,
     })
   })
 })

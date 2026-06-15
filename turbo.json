@@ -10,7 +10,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "env": ["OPEN_CONSENSUS_E2E_LIVE"],
+      "cache": false
     }
   }
 }
