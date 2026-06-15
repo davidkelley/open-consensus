@@ -1,0 +1,31 @@
+{
+  "name": "@open-consensus/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@open-consensus/adapters": "*",
+    "@open-consensus/config": "*",
+    "@open-consensus/core": "*",
+    "@open-consensus/proc": "*",
+    "better-sqlite3": "^11.7.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12"
+  }
+}
