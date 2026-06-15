@@ -10,6 +10,7 @@ import {
   type RunRecord,
   type RunState,
 } from '@open-consensus/engine'
+import { type ProcessTerminator, createProcessTerminator } from '@open-consensus/proc'
 import { type AdapterRegistry, resolvePanel } from './resolver'
 
 /** Long-poll ceiling (D4): a single poll never blocks longer than this. */
@@ -28,6 +29,11 @@ export interface DaemonCoreOptions {
   idleTtlMs?: number
   /** Injectable clock (the reaper; tests drive it). */
   now?: () => number
+  /** This daemon instance's id — tags spawned children + their pgid registry rows
+   * so a later instance can sweep this one's orphans (D10). */
+  daemonId?: string
+  /** Terminator for the startup orphan sweep (tests inject a fake). */
+  terminator?: ProcessTerminator
 }
 
 /** An authoritative round snapshot (D11) — always complete, never a delta. */
@@ -58,6 +64,8 @@ export class DaemonCore {
   private readonly maxWaitMs: number
   private readonly idleTtlMs: number
   private readonly now: () => number
+  private readonly daemonId: string | undefined
+  private readonly terminator: ProcessTerminator
   private readonly inflight = new Map<string, Inflight>()
   /** Last time any run-scoped call touched a run (idle-reaper clock). */
   private readonly lastTouched = new Map<string, number>()
@@ -69,12 +77,30 @@ export class DaemonCore {
     this.maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS
     this.idleTtlMs = Math.max(MIN_IDLE_TTL_MS, opts.idleTtlMs ?? 15 * MIN_IDLE_TTL_MS)
     this.now = opts.now ?? (() => Date.now())
-    this.engine = opts.engine ?? new Engine({ store: opts.store })
+    this.daemonId = opts.daemonId
+    this.terminator = opts.terminator ?? createProcessTerminator()
+    this.engine =
+      opts.engine ??
+      new Engine({ store: opts.store, ...(opts.daemonId ? { daemonId: opts.daemonId } : {}) })
   }
 
   /** Crash recovery — the daemon MUST call this once before serving (D15). */
   reconcile(): { repairedRounds: string[] } {
     return this.engine.reconcile()
+  }
+
+  /**
+   * Scoped orphan sweep (D10/D15): tree-kill any process group recorded by a
+   * PRIOR daemon instance that survived a crash, then clear those registry rows.
+   * Runs at startup BEFORE serving. A no-op without a daemonId. Returns the count
+   * of groups swept. The detached-group design accepts the (rare) pgid-reuse race.
+   */
+  async sweepOrphans(): Promise<number> {
+    if (this.daemonId === undefined) return 0
+    const pgids = this.store.foreignPgids(this.daemonId)
+    await Promise.all(pgids.map((pgid) => this.terminator.terminate(pgid).catch(() => {})))
+    this.store.clearForeignPgids(this.daemonId)
+    return pgids.length
   }
 
   // -- panels / runs (reads) ---------------------------------------------

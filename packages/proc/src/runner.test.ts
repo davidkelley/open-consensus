@@ -33,6 +33,18 @@ const stillAlive = (pid: number): boolean => {
 }
 
 describe('runProcess', () => {
+  it('reports the spawned pid via onSpawn (for the orphan registry)', async () => {
+    let spawned: number | undefined
+    const r = await run('echo', {
+      onSpawn: (pid) => {
+        spawned = pid
+      },
+    })
+    expect(r.outcome).toBe('exited')
+    expect(typeof spawned).toBe('number')
+    expect(spawned ?? 0).toBeGreaterThan(0)
+  })
+
   it('delivers stdin and captures a clean exit', async () => {
     const r = await runProcess(
       { file: NODE, args: [FIXTURE, 'echo'], stdin: 'hello world' },

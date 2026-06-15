@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { type Config, loadConfig } from '@open-consensus/config'
@@ -89,17 +90,21 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
       dbPath: join(paths.state, DB_NAME),
       rawDir: join(paths.data, RAW_DIRNAME),
     })
+    const daemonId = randomUUID()
     const core = new DaemonCore({
       store,
       config,
       adapters: opts.adapters,
+      daemonId,
       ...(opts.maxWaitMs !== undefined ? { maxWaitMs: opts.maxWaitMs } : {}),
       ...(opts.idleTtlMs !== undefined ? { idleTtlMs: opts.idleTtlMs } : {}),
       ...(opts.now ? { now: opts.now } : {}),
     })
 
-    // Reconcile crashed in-flight state BEFORE serving any request (D15).
+    // Recover crashed in-flight state AND sweep any process groups orphaned by a
+    // prior instance — both BEFORE serving any request (D15/D10).
     core.reconcile()
+    await core.sweepOrphans()
 
     const token = opts.token ?? generateToken()
     server = new DaemonServer({ core, token })

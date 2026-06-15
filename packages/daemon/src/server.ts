@@ -90,6 +90,9 @@ function readBody(req: IncomingMessage, max: number): Promise<Buffer | null> {
       if (!overflow) finish(Buffer.concat(chunks))
     })
     req.on('error', () => finish(null))
+    // A client that aborts mid-body emits 'close' without 'end' — resolve so the
+    // awaiting handler never leaks (a no-op after a normal 'end').
+    req.on('close', () => finish(null))
   })
 }
 
@@ -356,20 +359,8 @@ export class DaemonServer {
       if (seq > highWater) writeRaw(seq, JSON.stringify(event))
     })
 
-    // Backfill missed events from the durable log (synchronous; the event loop is
-    // blocked, so no live event can interleave and duplicate).
-    let since = lastEventId
-    for (;;) {
-      const { events, hasMore } = this.core.backfill(since)
-      for (const e of events) {
-        if (e.runId) this.core.touch(e.runId) // backfilled SSE traffic also resets the TTL
-        writeRaw(e.seq, e.payload)
-        since = e.seq
-      }
-      if (!hasMore) break
-    }
-    highWater = since
-
+    // Register cleanup + handlers BEFORE backfill, so a throw during backfill (a
+    // DB read / write error) still tears down the subscription via res 'close'.
     const ping = setInterval(() => res.write(': ping\n\n'), this.pingMs)
     if (typeof ping.unref === 'function') ping.unref()
     let cleanedUp = false
@@ -385,5 +376,19 @@ export class DaemonServer {
     // A write to a dropped client emits 'error' (EPIPE/ECONNRESET); handle it so
     // an unhandled stream error can't crash the daemon.
     res.on('error', cleanup)
+
+    // Backfill missed events from the durable log (synchronous; the event loop is
+    // blocked, so no live event can interleave and duplicate).
+    let since = lastEventId
+    for (;;) {
+      const { events, hasMore } = this.core.backfill(since)
+      for (const e of events) {
+        if (e.runId) this.core.touch(e.runId) // backfilled SSE traffic also resets the TTL
+        writeRaw(e.seq, e.payload)
+        since = e.seq
+      }
+      if (!hasMore) break
+    }
+    highWater = since
   }
 }

@@ -40,6 +40,11 @@ export interface RunOptions {
   /** Daemon id stamped into the child env for the orphan sweep. */
   daemonId?: string
   /**
+   * Called once with the child's pid (== pgid, since detached) right after spawn,
+   * so the engine can record the process group in its orphan registry (D10).
+   */
+  onSpawn?: (pid: number) => void
+  /**
    * Receives every RAW chunk (pre-clean) so the engine can spill it to disk.
    * Chunks are raw bytes: a multi-byte UTF-8 codepoint may split across two
    * chunks, so callers MUST concatenate (or use a StringDecoder) before decoding.
@@ -136,6 +141,7 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     }
 
     const pid = child.pid
+    if (pid !== undefined) options.onSpawn?.(pid)
 
     const killTree = (): void => {
       if (killing || pid === undefined) return

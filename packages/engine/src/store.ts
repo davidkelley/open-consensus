@@ -10,7 +10,7 @@ import {
   computeVerdict,
 } from './model'
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 export interface StoreOptions {
   /** SQLite file path (`:memory:` for tests). */
@@ -67,47 +67,60 @@ export class EngineStore {
   private migrate(): void {
     const current = this.db.pragma('user_version', { simple: true }) as number
     if (current >= SCHEMA_VERSION) return
-    // Transactional + idempotent (IF NOT EXISTS), so a restart race or a
-    // half-applied prior migration can't corrupt the schema.
+    // Ordered, incremental migrations (D17), transactional + idempotent (IF NOT
+    // EXISTS) so a restart race or a half-applied prior step can't corrupt schema.
     const tx = this.db.transaction(() => {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS runs (
-          runId TEXT PRIMARY KEY,
-          panelId TEXT NOT NULL,
-          state TEXT NOT NULL,
-          createdAt INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS rounds (
-          roundId TEXT PRIMARY KEY,
-          runId TEXT NOT NULL,
-          idx INTEGER NOT NULL,
-          prompt TEXT NOT NULL,
-          quorum INTEGER NOT NULL,
-          state TEXT NOT NULL,
-          verdict TEXT,
-          FOREIGN KEY (runId) REFERENCES runs(runId) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS rounds_runId ON rounds(runId);
-        CREATE TABLE IF NOT EXISTS invocations (
-          roundId TEXT NOT NULL,
-          agentId TEXT NOT NULL,
-          status TEXT NOT NULL,
-          attempts INTEGER NOT NULL,
-          distilled TEXT NOT NULL,
-          errorClass TEXT,
-          durationMs INTEGER NOT NULL,
-          truncated INTEGER NOT NULL,
-          rawRef TEXT,
-          PRIMARY KEY (roundId, agentId),
-          FOREIGN KEY (roundId) REFERENCES rounds(roundId) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS events (
-          seq INTEGER PRIMARY KEY AUTOINCREMENT,
-          runId TEXT,
-          payload TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS events_runId ON events(runId);
-      `)
+      if (current < 1) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS runs (
+            runId TEXT PRIMARY KEY,
+            panelId TEXT NOT NULL,
+            state TEXT NOT NULL,
+            createdAt INTEGER NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS rounds (
+            roundId TEXT PRIMARY KEY,
+            runId TEXT NOT NULL,
+            idx INTEGER NOT NULL,
+            prompt TEXT NOT NULL,
+            quorum INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            verdict TEXT,
+            FOREIGN KEY (runId) REFERENCES runs(runId) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS rounds_runId ON rounds(runId);
+          CREATE TABLE IF NOT EXISTS invocations (
+            roundId TEXT NOT NULL,
+            agentId TEXT NOT NULL,
+            status TEXT NOT NULL,
+            attempts INTEGER NOT NULL,
+            distilled TEXT NOT NULL,
+            errorClass TEXT,
+            durationMs INTEGER NOT NULL,
+            truncated INTEGER NOT NULL,
+            rawRef TEXT,
+            PRIMARY KEY (roundId, agentId),
+            FOREIGN KEY (roundId) REFERENCES rounds(roundId) ON DELETE CASCADE
+          );
+          CREATE TABLE IF NOT EXISTS events (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            runId TEXT,
+            payload TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS events_runId ON events(runId);
+        `)
+      }
+      if (current < 2) {
+        // Orphan process-group registry (D10): the daemon records each spawned
+        // detached pgid here and sweeps entries left by a prior instance on start.
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS pgids (
+            pgid INTEGER PRIMARY KEY,
+            daemonId TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS pgids_daemonId ON pgids(daemonId);
+        `)
+      }
       this.db.pragma(`user_version = ${SCHEMA_VERSION}`)
     })
     tx()
@@ -207,6 +220,34 @@ export class EngineStore {
       seq = this.appendEvent(runId, payload)
     })()
     return seq
+  }
+
+  // -- orphan process-group registry (plan D10) --------------------------
+
+  /** Record a spawned detached pgid against the owning daemon instance. */
+  recordPgid(pgid: number, daemonId: string): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO pgids (pgid, daemonId) VALUES (?, ?)')
+      .run(pgid, daemonId)
+  }
+
+  /** Forget a pgid once its child has terminated. */
+  removePgid(pgid: number): void {
+    this.db.prepare('DELETE FROM pgids WHERE pgid = ?').run(pgid)
+  }
+
+  /** Pgids recorded by a PRIOR daemon instance — the startup sweep's targets. */
+  foreignPgids(currentDaemonId: string): number[] {
+    return (
+      this.db.prepare('SELECT pgid FROM pgids WHERE daemonId != ?').all(currentDaemonId) as {
+        pgid: number
+      }[]
+    ).map((r) => r.pgid)
+  }
+
+  /** Drop all entries not owned by the current daemon (after sweeping them). */
+  clearForeignPgids(currentDaemonId: string): void {
+    this.db.prepare('DELETE FROM pgids WHERE daemonId != ?').run(currentDaemonId)
   }
 
   // -- raw blobs ----------------------------------------------------------

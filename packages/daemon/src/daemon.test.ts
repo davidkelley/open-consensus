@@ -217,6 +217,38 @@ describe('DaemonCore events + idle reaper', () => {
     h.cleanup()
   })
 
+  it('sweeps process groups left by a prior daemon instance on startup', async () => {
+    const terminated: number[] = []
+    const dir = mkdtempSync(join(tmpdir(), 'oc-sweep-'))
+    const store = new EngineStore({ dbPath: ':memory:', rawDir: join(dir, 'raw') })
+    store.recordPgid(4242, 'old-daemon') // an orphan from a crashed instance
+    store.recordPgid(9999, 'this-daemon') // our own — must NOT be swept
+    const core = new DaemonCore({
+      store,
+      config,
+      adapters: registry,
+      daemonId: 'this-daemon',
+      terminator: {
+        terminate: (pid) => {
+          terminated.push(pid)
+          return Promise.resolve()
+        },
+      },
+    })
+    expect(await core.sweepOrphans()).toBe(1)
+    expect(terminated).toEqual([4242])
+    expect(store.foreignPgids('this-daemon')).toEqual([]) // cleared after sweeping
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('sweepOrphans is a no-op without a daemon id', async () => {
+    const h = makeCore()
+    expect(await h.core.sweepOrphans()).toBe(0)
+    h.store.close()
+    h.cleanup()
+  })
+
   it('gives a never-before-seen run a fresh clock instead of parking it', async () => {
     let clock = 5_000_000
     const h = makeCore({ now: () => clock, idleTtlMs: 0 })

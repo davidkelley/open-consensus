@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type Adapter, type MockMode, createMockAdapter } from '@open-consensus/adapters'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Engine, type PanelAgent } from './engine'
 import { EngineStore } from './store'
 
@@ -124,6 +124,49 @@ describe('Engine.dispatchRound', () => {
     expect(round.prompt).toContain('[REDACTED]')
     expect(round.prompt).not.toContain(secret)
     expect(store.getRound(round.roundId)?.prompt).not.toContain(secret)
+  })
+
+  it('records its process group in the orphan registry and clears it on completion', async () => {
+    const eng = new Engine({ store, daemonId: 'd1', sleep: () => Promise.resolve() })
+    const recordSpy = vi.spyOn(store, 'recordPgid')
+    const run = eng.createRun('p')
+    await eng.dispatchRound(run, { panelId: 'p', quorum: 1, agents: [agent('a')] }, 'x')
+    expect(recordSpy).toHaveBeenCalled()
+    // Removed on completion -> nothing for a later daemon instance to sweep.
+    expect(store.foreignPgids('d2')).toEqual([])
+  })
+
+  it('retries under backoff with a live (un-aborted) signal threaded through', async () => {
+    const controller = new AbortController()
+    const run = engine.createRun('p')
+    const round = await engine.dispatchRound(
+      run,
+      { panelId: 'p', quorum: 1, agents: [agent('a', 'error', { maxRetries: 1 })] },
+      'x',
+      { signal: controller.signal },
+    )
+    expect(round.invocations[0]).toMatchObject({ status: 'error', attempts: 2 })
+  })
+
+  it('wakes from retry backoff the moment the round is aborted', async () => {
+    const controller = new AbortController()
+    // The injected backoff aborts the round, so the next attempt short-circuits.
+    const eng = new Engine({
+      store,
+      sleep: () => {
+        controller.abort()
+        return Promise.resolve()
+      },
+    })
+    const run = eng.createRun('p')
+    const round = await eng.dispatchRound(
+      run,
+      { panelId: 'p', quorum: 1, agents: [agent('a', 'error', { maxRetries: 3 })] },
+      'x',
+      { signal: controller.signal },
+    )
+    expect(round.invocations[0]?.attempts).toBeLessThan(4)
+    expect(round.invocations[0]?.status).toBe('cancelled')
   })
 
   it('isolates failures and yields a degraded verdict', async () => {

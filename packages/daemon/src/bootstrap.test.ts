@@ -135,6 +135,28 @@ describe('startDaemon lifecycle', () => {
     expect(readDiscovery(join(paths.runtime, 'discovery.json'))).toBeUndefined()
   })
 
+  it('sweeps orphaned process groups from a prior instance on startup', async () => {
+    const paths = makePaths(freshDir())
+    mkdirSync(paths.state, { recursive: true })
+    const seed = new EngineStore({
+      dbPath: join(paths.state, 'engine.sqlite'),
+      rawDir: join(paths.data, 'raw'),
+    })
+    // A (dead) pgid recorded by a previous daemon instance. The real terminator
+    // no-ops on a dead group; startup must still clear the stale registry row.
+    seed.recordPgid(2_147_480_000, 'prior-daemon')
+    seed.close()
+
+    const daemon = await startDaemon({ adapters: registry, config, paths, loopback: true })
+    const after = new EngineStore({
+      dbPath: join(paths.state, 'engine.sqlite'),
+      rawDir: join(paths.data, 'raw'),
+    })
+    expect(after.foreignPgids('never')).toEqual([]) // the prior instance's row was swept
+    after.close()
+    await daemon.stop()
+  })
+
   it('reconciles crashed in-flight state before serving', async () => {
     const paths = makePaths(freshDir())
     mkdirSync(paths.state, { recursive: true })

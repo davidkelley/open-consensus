@@ -56,6 +56,9 @@ export interface EngineOptions {
   now?: () => number
   /** Backoff sleep — tests inject an instant resolver. */
   sleep?: (ms: number) => Promise<void>
+  /** This daemon instance's id — stamped on spawned children + their pgid registry
+   * rows so a later instance can sweep this one's orphans (D10). */
+  daemonId?: string
 }
 
 /** A small async counting semaphore (FIFO waiters). */
@@ -138,6 +141,7 @@ export class Engine {
   private readonly distillCap: number
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
+  private readonly daemonId: string | undefined
   /** Engine-global concurrency cap, shared across concurrent dispatchRound calls. */
   private readonly globalSem: Semaphore
   /** Engine-global per-adapter serialization chains (span concurrent rounds). */
@@ -150,6 +154,7 @@ export class Engine {
     this.now = options.now ?? (() => Date.now())
     this.sleep =
       options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+    this.daemonId = options.daemonId
     this.globalSem = new Semaphore(Math.max(1, options.concurrency ?? DEFAULT_GLOBAL_CONCURRENCY))
   }
 
@@ -342,7 +347,10 @@ export class Engine {
         }
       }
       if (!isRetriable(record.status) || attempt === maxAttempts) break
-      await this.sleep(this.backoff(attempt))
+      // Wake early if the round is aborted mid-backoff, so a cancel isn't stuck
+      // behind a (capped 30s) sleep; the next attempt then short-circuits to
+      // `cancelled` via the runner's pre-spawn abort check.
+      await this.sleepOrAbort(this.backoff(attempt), options.signal)
     }
 
     this.persistWith(run.runId, () => this.store.upsertInvocation(roundId, record), {
@@ -365,6 +373,9 @@ export class Engine {
     options: DispatchOptions,
   ): Promise<InvocationRecord> {
     const scratch = mkdtempSync(join(tmpdir(), 'oc-scratch-'))
+    // Track this attempt's process group so it is removed from the orphan
+    // registry once the child exits (D10).
+    let pgid: number | undefined
     try {
       const ctx: AdapterInvocationContext = {
         prompt,
@@ -389,6 +400,13 @@ export class Engine {
           timeoutMs: agent.timeoutMs,
           maxOutputBytes: MAX_OUTPUT_BYTES,
           ...(options.signal ? { signal: options.signal } : {}),
+          ...(this.daemonId ? { daemonId: this.daemonId } : {}),
+          // Record the detached pgid up front so a daemon crash mid-run leaves a
+          // registry entry the next instance can sweep.
+          onSpawn: (pid) => {
+            pgid = pid
+            if (this.daemonId) this.store.recordPgid(pid, this.daemonId)
+          },
           // onRaw fires before the runner's own cap, so bound our accumulation
           // too (chunks arriving before a tree-kill lands could exceed the cap).
           onRaw: (_stream, chunk) => {
@@ -418,8 +436,26 @@ export class Engine {
         rawRef,
       }
     } finally {
+      if (pgid !== undefined) this.store.removePgid(pgid)
       rmSync(scratch, { recursive: true, force: true })
     }
+  }
+
+  /** Backoff that resolves early if the round is aborted mid-sleep. */
+  private sleepOrAbort(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) return this.sleep(ms)
+    if (signal.aborted) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', done)
+        resolve()
+      }
+      signal.addEventListener('abort', done, { once: true })
+      void this.sleep(ms).then(done)
+    })
   }
 
   private backoff(attempt: number): number {

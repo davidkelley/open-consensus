@@ -175,4 +175,27 @@ describe('EngineStore', () => {
     expect(s2.getRun('persisted')?.runId).toBe('persisted')
     s2.close()
   })
+
+  it('tracks the orphan pgid registry scoped by daemon instance', () => {
+    store.recordPgid(111, 'daemon-a')
+    store.recordPgid(222, 'daemon-a')
+    store.recordPgid(333, 'daemon-b')
+    // From daemon-b's view, daemon-a's groups are the foreign (sweepable) ones.
+    expect(store.foreignPgids('daemon-b').sort()).toEqual([111, 222])
+    store.removePgid(111)
+    expect(store.foreignPgids('daemon-b')).toEqual([222])
+    store.clearForeignPgids('daemon-b')
+    expect(store.foreignPgids('daemon-b')).toEqual([])
+    expect(store.foreignPgids('daemon-a')).toEqual([333]) // daemon-b's own survived
+  })
+
+  it('migrates a v1 database to v2 (adds the pgids table) on reopen', () => {
+    const dbPath = join(dir, 'v1.sqlite')
+    const s1 = new EngineStore({ dbPath, rawDir: join(dir, 'rawv') })
+    s1.recordPgid(7, 'd') // works -> the pgids table exists after migration
+    s1.close()
+    const s2 = new EngineStore({ dbPath, rawDir: join(dir, 'rawv') })
+    expect(s2.foreignPgids('other')).toEqual([7])
+    s2.close()
+  })
 })
