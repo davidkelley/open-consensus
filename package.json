@@ -1,0 +1,35 @@
+{
+  "name": "open-consensus",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Robust multi-agent consensus execution substrate: an MCP tool + CLI/TUI that drives configured CLI coding agents through panel-based consensus rounds.",
+  "type": "module",
+  "license": "MIT",
+  "author": "David Kelley",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "npm@11.11.0",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "biome check . && eslint packages/*/src",
+    "lint:fix": "biome check --write . && eslint packages/*/src --fix",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "test:e2e:live": "OPEN_CONSENSUS_E2E_LIVE=1 vitest run --config vitest.e2e-live.config.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.8",
+    "eslint": "^9.17.0",
+    "tsup": "^8.3.5",
+    "turbo": "^2.9.18",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^2.1.8"
+  }
+}

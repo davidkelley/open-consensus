@@ -123,6 +123,29 @@ Shipping this enables: (1) any agent (Claude Code, Codex, …) to drive a reliab
 
 ---
 
+## Structural amendment (post-approval): Turborepo monorepo
+
+After plan approval, the user had already scaffolded a **Turborepo** root and chose (via `AskUserQuestion`) a **monorepo with per-component packages** rather than the plan's original single-package `src/` layout. This supersedes the file paths in the stage list below; the *content* of each stage is unchanged. Bonus: real package boundaries enforce the `command-core`↔`tui-session` separation the reviewers wanted (D19) without dependency-cruiser — `command-core`'s `package.json` simply does not depend on `tui`.
+
+**D22 — Turborepo monorepo, per-component packages.** npm workspaces + `turbo` orchestrating `build`/`test`/`typecheck`; one shared root Biome config + ESLint async-safety overlay; per-package `vitest` with the shared ≥90% coverage gate and the `no-live` guard. Package map (built up stage by stage):
+
+| Package | Holds | Stage |
+| --- | --- | --- |
+| `@open-consensus/core` | XDG paths, shared zod schemas/types, secret redaction | 1–2 |
+| `@open-consensus/config` | Agent/Panel/Config schema + store + migrations | 2 |
+| `@open-consensus/proc` | process runner + `ProcessTerminator` | 3 |
+| `@open-consensus/adapters` | adapter contract + mock + chaos + real CLIs | 3, 7 |
+| `@open-consensus/engine` | run/round state machine, quorum, distill, SQLite | 4 |
+| `@open-consensus/daemon` | socket server, routes, SSE, lifecycle | 5 |
+| `@open-consensus/mcp` | stdio MCP server — bin `open-consensus-mcp` | 6 |
+| `@open-consensus/command-core` | stateless shared CLI/TUI ops (no SSE lifecycle) | 8 |
+| `@open-consensus/tui` | ink app + `tui-session` (depends on command-core) | 9 |
+| `@open-consensus/cli` | commander + TUI launcher — bin `open-consensus` | 8 |
+
+Stage file paths below should be read as `packages/<pkg>/src/...`. Stage 1 shipped `core` (paths) plus `cli`/`mcp` bin stubs and the root toolchain.
+
+---
+
 ## Stages (vertical-slice ordered)
 
 Per round-1 feedback, the build is **vertical**: freeze the adapter/process contract, then drive a *mock-agent* slice all the way through engine → daemon → MCP (working end-to-end at Stage 6) *before* writing real adapters. Each stage is its own commit and clears the panel review loop before the next begins. All engine/daemon/MCP tests use the **mock + chaos-child** fixtures (no real CLIs, no spend).

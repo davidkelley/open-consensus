@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["vitest.shared.ts", "vitest.e2e-live.config.ts", "test"]
+}
