@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 
 /**
  * Daemon lifecycle primitives (plan D2/D14): an atomic single-instance lock and
@@ -40,13 +40,16 @@ function readLock(lockPath: string): LockInfo | undefined {
  * reclaimed and retried once.
  */
 export function acquireLock(lockPath: string, info: LockInfo, reclaimed = false): boolean {
+  // Write the content to a private temp file, then hard-link it into place.
+  // link() is atomic and fails EEXIST if the lock already exists — so a concurrent
+  // starter that loses the race always observes a COMPLETE lock file, never an
+  // empty/partial one. (An `openSync('wx')` then write exposes a window where the
+  // file exists but is still empty, which would let two daemons both reclaim it —
+  // the exact split-brain D14 forbids.)
+  const tmp = `${lockPath}.acquire-${randomBytes(6).toString('hex')}`
   try {
-    const fd = openSync(lockPath, 'wx', 0o600)
-    try {
-      writeFileSync(fd, JSON.stringify(info))
-    } finally {
-      closeSync(fd)
-    }
+    writeFileSync(tmp, JSON.stringify(info), { mode: 0o600 })
+    linkSync(tmp, lockPath)
     return true
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
@@ -55,6 +58,8 @@ export function acquireLock(lockPath: string, info: LockInfo, reclaimed = false)
     if (reclaimed) return false // already tried once; avoid a reclaim loop
     rmSync(lockPath, { force: true })
     return acquireLock(lockPath, info, true)
+  } finally {
+    rmSync(tmp, { force: true })
   }
 }
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -24,9 +24,11 @@ describe('lifecycle lock', () => {
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-  it('acquires a free lock and records the owner', () => {
+  it('acquires a free lock and records the owner (no temp left behind)', () => {
     expect(acquireLock(lockPath, me)).toBe(true)
     expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toEqual(me)
+    // The atomic temp+link must not leave a stray `.acquire-*` file.
+    expect(readdirSync(dir).filter((f) => f.includes('.acquire-'))).toEqual([])
   })
 
   it('refuses when a live owner holds it', () => {

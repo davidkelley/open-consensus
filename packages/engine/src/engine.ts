@@ -422,10 +422,14 @@ export class Engine {
           },
           // onRaw fires before the runner's own cap, so bound our accumulation
           // too (chunks arriving before a tree-kill lands could exceed the cap).
+          // Clamp the final chunk to the remaining budget so capture never spills
+          // past MAX_OUTPUT_BYTES, even by one chunk.
           onRaw: (_stream, chunk) => {
-            if (rawBytes < MAX_OUTPUT_BYTES) {
-              rawChunks.push(chunk)
-              rawBytes += chunk.length
+            const remaining = MAX_OUTPUT_BYTES - rawBytes
+            if (remaining > 0) {
+              const slice = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk
+              rawChunks.push(slice)
+              rawBytes += slice.length
             }
           },
         },

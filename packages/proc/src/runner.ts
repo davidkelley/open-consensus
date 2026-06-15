@@ -141,15 +141,6 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     }
 
     const pid = child.pid
-    if (pid !== undefined) {
-      // A throwing onSpawn (e.g. a registry write failure) must NOT strand the
-      // just-spawned child before its lifecycle handlers are wired up below.
-      try {
-        options.onSpawn?.(pid)
-      } catch {
-        /* the child stays fully managed regardless */
-      }
-    }
 
     const killTree = (): void => {
       if (killing || pid === undefined) return
@@ -219,6 +210,18 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     if (signal) {
       signal.addEventListener('abort', onAbort, { once: true })
       cleanups.push(() => signal.removeEventListener('abort', onAbort))
+    }
+
+    // Report the pgid only AFTER every lifecycle handler (close/error/timeout/
+    // abort) is wired up, so even a callback that yields can't let a child event
+    // fire before its listener exists. Wrapped: a throwing/registry-failing
+    // callback must never strand the now-fully-managed child.
+    if (pid !== undefined) {
+      try {
+        options.onSpawn?.(pid)
+      } catch {
+        /* the child stays fully managed regardless */
+      }
     }
   })
 }

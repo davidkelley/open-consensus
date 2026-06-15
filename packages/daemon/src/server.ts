@@ -373,8 +373,10 @@ export class DaemonServer {
     }
     req.on('close', cleanup)
     res.on('close', cleanup)
-    // A write to a dropped client emits 'error' (EPIPE/ECONNRESET); handle it so
-    // an unhandled stream error can't crash the daemon.
+    // A write to a dropped client emits 'error' (EPIPE/ECONNRESET); handle both
+    // streams so an unhandled error can't crash the daemon and cleanup is
+    // exhaustive even when 'close' doesn't follow a socket error.
+    req.on('error', cleanup)
     res.on('error', cleanup)
 
     // Backfill missed events from the durable log (synchronous; the event loop is

@@ -146,7 +146,11 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
     } catch {
       /* best-effort: never let cleanup mask the original startup error */
     }
-    store?.close()
+    try {
+      store?.close()
+    } catch {
+      /* ditto — a close failure must not suppress the real error */
+    }
     rmSync(discoveryPath, { force: true })
     releaseLock(lockPath, lockInfo)
     throw err
@@ -188,7 +192,10 @@ export async function waitForReady(
     } catch {
       /* not up yet (connection refused, or a half-open endpoint timed out) */
     }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    await new Promise((resolve) => {
+      const t = setTimeout(resolve, intervalMs)
+      if (typeof t.unref === 'function') t.unref() // never hold the process open
+    })
   }
   return false
 }
