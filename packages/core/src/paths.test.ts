@@ -1,9 +1,36 @@
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { type PathEnv, appPaths, cacheDir, configDir, dataDir, runtimeDir, stateDir } from './paths'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  type PathEnv,
+  appPaths,
+  cacheDir,
+  configDir,
+  dataDir,
+  resolveBase,
+  runtimeDir,
+  stateDir,
+} from './paths'
 
 const HOME = '/home/tester'
+
+describe('resolveBase', () => {
+  it('prefers an absolute env value', () => {
+    expect(resolveBase('/abs', '/fallback', 'home')).toBe('/abs')
+  })
+
+  it('falls back to an absolute fallback when the env value is relative or unset', () => {
+    expect(resolveBase('relative', '/fallback', 'home')).toBe('/fallback')
+    expect(resolveBase(undefined, '/fallback', 'home')).toBe('/fallback')
+  })
+
+  it('throws when neither the env value nor the fallback is absolute', () => {
+    expect(() => resolveBase('relative', 'also-relative', 'home')).toThrow(
+      /absolute home directory/,
+    )
+    expect(() => resolveBase(undefined, '', 'runtime')).toThrow(/absolute runtime directory/)
+  })
+})
 
 describe('paths', () => {
   it('honors absolute XDG_* overrides', () => {
@@ -55,8 +82,19 @@ describe('paths', () => {
     expect(runtimeDir({ HOME }, 'darwin')).toBe('/tmp/open-consensus')
   })
 
-  it('runtimeDir falls back to os.tmpdir() off macOS', () => {
+  it('runtimeDir falls back to os.tmpdir() off macOS when it is absolute', () => {
     expect(runtimeDir({ HOME }, 'linux')).toBe(join(tmpdir(), 'open-consensus'))
+  })
+
+  describe('with a relative TMPDIR off macOS', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('uses /tmp rather than propagating a relative os.tmpdir()', () => {
+      vi.stubEnv('TMPDIR', 'relative-tmp')
+      expect(runtimeDir({ HOME }, 'linux')).toBe('/tmp/open-consensus')
+    })
   })
 
   it('reads process.env when no env is supplied', () => {
@@ -65,18 +103,17 @@ describe('paths', () => {
     expect(dir.endsWith('/open-consensus')).toBe(true)
   })
 
-  it('appPaths resolves every directory at once', () => {
+  it('appPaths resolves every directory at once (platform threaded through)', () => {
     const env: PathEnv = { HOME }
-    const expectedRuntime = join(
-      process.platform === 'darwin' ? '/tmp' : tmpdir(),
-      'open-consensus',
-    )
-    expect(appPaths(env)).toEqual({
+    // Inject platform explicitly so the runtime assertion is deterministic and
+    // not tautological with the implementation's own process.platform.
+    expect(appPaths(env, 'darwin')).toEqual({
       config: '/home/tester/.config/open-consensus',
       state: '/home/tester/.local/state/open-consensus',
       data: '/home/tester/.local/share/open-consensus',
       cache: '/home/tester/.cache/open-consensus',
-      runtime: expectedRuntime,
+      runtime: '/tmp/open-consensus',
     })
+    expect(appPaths(env, 'linux').runtime).toBe(join(tmpdir(), 'open-consensus'))
   })
 })

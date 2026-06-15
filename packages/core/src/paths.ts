@@ -31,10 +31,23 @@ function resolveEnv(env: PathEnv | undefined): PathEnv {
   return env ?? (process.env as PathEnv)
 }
 
+/**
+ * Resolve a base directory to an **absolute** path: prefer `envValue` when it is
+ * absolute, else `fallback` when it is absolute, else throw. Both the env var
+ * *and* the OS fallback are validated — `os.homedir()`/`os.tmpdir()` can return
+ * a relative value (e.g. a relative `TMPDIR`) in broken environments, and a
+ * relative base would silently scatter app files into the cwd.
+ */
+export function resolveBase(envValue: string | undefined, fallback: string, label: string): string {
+  if (envValue && isAbsolute(envValue)) return envValue
+  if (isAbsolute(fallback)) return fallback
+  throw new Error(
+    `Cannot resolve an absolute ${label} directory (env='${envValue ?? ''}', fallback='${fallback}').`,
+  )
+}
+
 function homeOf(env: PathEnv): string {
-  // Honor HOME only when it is an absolute path; otherwise a relative/empty
-  // HOME would silently scatter app files into the cwd, so fall back to homedir.
-  return env.HOME && isAbsolute(env.HOME) ? env.HOME : homedir()
+  return resolveBase(env.HOME, homedir(), 'home')
 }
 
 /**
@@ -80,8 +93,11 @@ export function cacheDir(env?: PathEnv): string {
  */
 export function runtimeDir(env?: PathEnv, platform: NodeJS.Platform = process.platform): string {
   const e = resolveEnv(env)
-  const fallback = platform === 'darwin' ? '/tmp' : tmpdir()
-  return join(absoluteOr(e.XDG_RUNTIME_DIR, fallback), APP)
+  // On darwin the OS temp dir is deep (/var/folders/...), so use the short, safe
+  // /tmp; elsewhere prefer the OS temp dir, but only if it resolved absolute.
+  const osTmp = tmpdir()
+  const fallback = platform === 'darwin' ? '/tmp' : isAbsolute(osTmp) ? osTmp : '/tmp'
+  return join(resolveBase(e.XDG_RUNTIME_DIR, fallback, 'runtime'), APP)
 }
 
 /** All resolved application directories. */
@@ -94,12 +110,12 @@ export interface AppPaths {
 }
 
 /** Resolve every application directory at once. */
-export function appPaths(env?: PathEnv): AppPaths {
+export function appPaths(env?: PathEnv, platform: NodeJS.Platform = process.platform): AppPaths {
   return {
     config: configDir(env),
     state: stateDir(env),
     data: dataDir(env),
     cache: cacheDir(env),
-    runtime: runtimeDir(env),
+    runtime: runtimeDir(env, platform),
   }
 }
