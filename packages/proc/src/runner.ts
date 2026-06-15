@@ -83,6 +83,7 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     let outcome: RunOutcome = 'exited'
     let truncated = false
     let killing = false
+    let reasonLatched = false
     const cleanups: Array<() => void> = []
     const streams: Record<'stdout' | 'stderr', Stream> = {
       stdout: { chunks: [], bytes: 0 },
@@ -149,9 +150,14 @@ export function runProcess(spec: ProcessSpec, options: RunOptions): Promise<RunR
     }
 
     // First terminal kill reason wins (a later timeout must not mask an
-    // already-recorded output-overflow, and vice versa).
+    // already-recorded output-overflow, and vice versa). The reason latch is set
+    // atomically with the outcome here — independent of killTree's kill-once
+    // latch — so the invariant holds structurally, not just by event-loop luck.
     const requestKill = (reason: RunOutcome): void => {
-      if (!killing) outcome = reason
+      if (!reasonLatched) {
+        outcome = reason
+        reasonLatched = true
+      }
       killTree()
     }
 
