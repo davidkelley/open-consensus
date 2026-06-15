@@ -24,6 +24,16 @@ let server: Server
 let endpoint: string
 const TOKEN = 'test-token'
 
+function isAliveForTest(pid: number | undefined): boolean {
+  if (pid === undefined) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** A minimal fake daemon HTTP server covering the routes command-core calls. */
 function startFakeServer(): Promise<void> {
   server = createServer((req, res) => {
@@ -250,6 +260,24 @@ describe('stopDaemonCommand', () => {
     const result = await stopDaemonCommand(discoveryPath, { attempts: 100, intervalMs: 20 })
     expect(result.stopped).toBe(true)
     expect(result.pid).toBe(child.pid)
+  })
+
+  it('refuses to signal a PID when the endpoint is not responding (stale/reused)', async () => {
+    // Live, signalable process, but the discovery endpoint is dead -> we must NOT
+    // signal it (it could be a recycled PID owned by something unrelated).
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
+    await new Promise((r) => setTimeout(r, 50))
+    writeFileSync(
+      discoveryPath,
+      JSON.stringify({ endpoint: 'http://127.0.0.1:1', token: TOKEN, pid: child.pid }),
+    )
+    const result = await stopDaemonCommand(discoveryPath)
+    expect(result).toMatchObject({
+      stopped: false,
+      reason: expect.stringMatching(/not responding/),
+    })
+    expect(isAliveForTest(child.pid)).toBe(true) // still alive — we did not signal it
+    child.kill('SIGKILL')
   })
 
   it('reports failure when the process ignores the signal and never exits', async () => {

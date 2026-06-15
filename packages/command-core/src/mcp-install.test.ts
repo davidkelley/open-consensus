@@ -84,6 +84,31 @@ describe('mcp install', () => {
     })
   })
 
+  it('treats a malformed existing entry as a conflict (no crash)', () => {
+    writeFileSync(hostPath, JSON.stringify({ mcpServers: { 'open-consensus': null } }))
+    const result = mcpInstallCommand({ host: { path: hostPath } })
+    expect(result.action).toBe('conflict')
+    expect(result.existing).toBeUndefined()
+    // …and force replaces it cleanly.
+    const forced = mcpInstallCommand({ host: { path: hostPath }, force: true })
+    expect(forced.action).toBe('updated')
+    expect((readHost().mcpServers as Record<string, unknown>)['open-consensus']).toEqual(
+      DEFAULT_MCP_ENTRY,
+    )
+  })
+
+  it('is idempotent regardless of env-key insertion order', () => {
+    mcpInstallCommand({
+      host: { path: hostPath },
+      entry: { command: 'x', args: [], env: { B: '2', A: '1' } },
+    })
+    const result = mcpInstallCommand({
+      host: { path: hostPath },
+      entry: { command: 'x', args: [], env: { A: '1', B: '2' } },
+    })
+    expect(result.action).toBe('unchanged')
+  })
+
   it('refuses to modify a malformed (non-JSON) host config', () => {
     writeFileSync(hostPath, '{ not json')
     expect(() => mcpInstallCommand({ host: { path: hostPath } })).toThrow(/malformed/)

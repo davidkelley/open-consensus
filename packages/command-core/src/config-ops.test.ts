@@ -57,10 +57,10 @@ describe('agent commands', () => {
     expect(result.warnings.join(' ')).toMatch(/not detected/)
   })
 
-  it('warns when the adapter id is unknown to the registry', async () => {
-    const result = await addAgentCommand(ctx, { id: 'x', adapter: 'made-up' }, registry())
-    expect(result.warnings.join(' ')).toMatch(/not a known adapter/)
-    expect(result.detected).toBeUndefined()
+  it('throws when the adapter id is unknown to the registry', async () => {
+    await expect(addAgentCommand(ctx, { id: 'x', adapter: 'made-up' }, registry())).rejects.toThrow(
+      /unknown adapter/,
+    )
   })
 
   it('refuses an unsandboxed adapter without the acknowledgment (D20)', async () => {
@@ -153,9 +153,11 @@ describe('agent test', () => {
     expect(result.invocation.args).not.toContain('Respond with OK to confirm you are reachable.')
   })
 
-  it('reports an unknown-adapter agent without spawning', async () => {
-    await addAgentCommand(ctx, { id: 'x', adapter: 'made-up' }, registry())
-    const result = await testAgentCommand(ctx, 'x', registry())
+  it('reports an unknown-adapter agent (config drift) without spawning', async () => {
+    // The agent was added against a registry that had 'claude'; testing it against
+    // a registry that no longer does exercises the defensive unknown-adapter path.
+    await addAgentCommand(ctx, { id: 'a', adapter: 'claude' }, registry())
+    const result = await testAgentCommand(ctx, 'a', new Map<string, Adapter>())
     expect(result.detected.available).toBe(false)
     expect(result.detected.reason).toMatch(/unknown adapter/)
   })

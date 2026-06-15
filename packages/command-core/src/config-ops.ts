@@ -93,30 +93,29 @@ export async function addAgentCommand(
     ...(input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {}),
   })
 
-  const warnings: string[] = []
+  // Validate the adapter id up front (a typo'd/unknown id would silently be
+  // `unavailable` forever); only a *known* adapter whose binary isn't installed
+  // is a non-fatal warning (you can configure it before installing the CLI).
   const adapter = registry.get(agent.adapter)
   if (!adapter) {
-    warnings.push(
-      `adapter '${agent.adapter}' is not a known adapter — this agent will be 'unavailable' at run time`,
+    throw new Error(
+      `unknown adapter '${agent.adapter}' — valid adapters: ${[...registry.keys()].sort().join(', ')}`,
     )
-  } else if (adapter.capabilities.sandbox === false && !input.allowUnsandboxed) {
+  }
+  if (adapter.capabilities.sandbox === false && !input.allowUnsandboxed) {
     throw new Error(
       `adapter '${agent.adapter}' has no native read-only/sandbox mode — it can read, write, or exfiltrate anything your account can reach. Re-run with the unsandboxed acknowledgment to add it anyway (D20).`,
     )
   }
 
-  let detected: DetectResult | undefined
-  if (adapter) {
-    detected = await adapter.detect()
-    if (!detected.available) {
-      warnings.push(
-        `adapter '${agent.adapter}' binary not detected: ${detected.reason ?? 'unknown'}`,
-      )
-    }
+  const warnings: string[] = []
+  const detected = await adapter.detect()
+  if (!detected.available) {
+    warnings.push(`adapter '${agent.adapter}' binary not detected: ${detected.reason ?? 'unknown'}`)
   }
 
   saveConfig(addAgent(read(ctx), agent), ctx.configFile)
-  return { agent, warnings, ...(detected ? { detected } : {}) }
+  return { agent, warnings, detected }
 }
 
 export function listAgentsCommand(ctx: ConfigContext): readonly Agent[] {
@@ -216,9 +215,10 @@ function buildPreviewInvocation(adapter: Adapter, agent: Agent): AgentTestResult
     cwd: '<scratch>',
   })
   const promptDelivery = spec.stdin !== undefined ? 'stdin' : 'arg'
-  // Elide the (non-secret, but illustrative) prompt from argv so the preview
-  // demonstrates how the prompt is delivered without echoing it inline.
-  const args = spec.args.map((a) => (a === SAMPLE_PROMPT ? '<prompt>' : a))
+  // Elide the (non-secret, but illustrative) prompt from argv, and redact any
+  // secret a user may have put in a config arg (e.g. `--api-key=sk-…`) before it
+  // is ever shown — argv must never leak a secret to the terminal (D10).
+  const args = spec.args.map((a) => (a === SAMPLE_PROMPT ? '<prompt>' : redactString(a)))
   return { file: spec.file, args, promptDelivery, envKeys: Object.keys(spec.env) }
 }
 

@@ -28,7 +28,12 @@ function sourceFiles(): string[] {
 /** Extract every imported module specifier (static, side-effect, and dynamic). */
 function importSpecifiers(text: string): string[] {
   const specs: string[] = []
-  const patterns = [/\bfrom\s+['"]([^'"]+)['"]/g, /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g]
+  const patterns = [
+    /\bfrom\s+['"]([^'"]+)['"]/g, // `import … from 'x'`
+    /\bimport\s+['"]([^'"]+)['"]/g, // side-effect `import 'x'`
+    /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g, // dynamic `import('x')`
+    /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g, // `require('x')`
+  ]
   for (const re of patterns) {
     let match: RegExpExecArray | null = re.exec(text)
     while (match !== null) {

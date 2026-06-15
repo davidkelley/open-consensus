@@ -35,18 +35,26 @@ export interface RegistryOptions {
    * after the user has acknowledged the risk (the CLI's `agent add`, Stage 8/D21).
    */
   includeUnsandboxed?: boolean
+  /**
+   * Include the deterministic test-only `mock` adapter. On by default for the
+   * engine/daemon test harness; the CLI passes `false` so `init`/`agent` never
+   * surface or auto-seed `mock` in a real user config (Stage 8).
+   */
+  includeMock?: boolean
 }
 
 /**
  * Build the daemon's adapter registry: the built-in sandboxed real adapters plus
- * the deterministic `mock`. Adapters that lack a native sandbox (opencode) are
- * EXCLUDED unless `includeUnsandboxed` is set, so a default config can never
- * silently dispatch to an unconstrained tool (D20). Unknown ids in a user config
- * are simply absent (the resolver drops them).
+ * (by default) the deterministic `mock`. Adapters that lack a native sandbox
+ * (opencode) are EXCLUDED unless `includeUnsandboxed` is set, so a default config
+ * can never silently dispatch to an unconstrained tool (D20); `mock` is excluded
+ * when `includeMock` is `false` so the test shim never leaks into production
+ * paths. Unknown ids in a user config are simply absent (the resolver drops them).
  */
 export function defaultRegistry(options: RegistryOptions = {}): Map<string, Adapter> {
+  const includeMock = options.includeMock ?? true
   const registry = new Map<string, Adapter>()
-  for (const id of [...REAL_ADAPTER_IDS, 'mock']) {
+  for (const id of [...REAL_ADAPTER_IDS, ...(includeMock ? ['mock'] : [])]) {
     const adapter = createAdapter(id)
     if (!adapter) continue
     if (!adapter.capabilities.sandbox && !options.includeUnsandboxed) continue

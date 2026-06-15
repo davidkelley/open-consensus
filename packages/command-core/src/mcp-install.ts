@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { chmodSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { z } from 'zod'
 
 /**
  * Register the Open Consensus MCP server in a host's config (plan D21 / Stage 8)
@@ -94,12 +95,36 @@ function writeHost(path: string, host: HostFile): void {
   }
 }
 
+/** Shape of a `mcpServers` entry we will read/compare (lenient on extra fields). */
+const entrySchema = z.object({
+  command: z.string(),
+  args: z.array(z.string()).default([]),
+  env: z.record(z.string()).optional(),
+})
+
+/**
+ * Coerce an existing (untrusted, possibly hand-edited) entry into a normalized
+ * {@link McpServerEntry}, or `undefined` if it is malformed (null, an array, a
+ * string, missing `command`, …). Guards against crashing on a bad host config.
+ */
+function coerceEntry(value: unknown): McpServerEntry | undefined {
+  const parsed = entrySchema.safeParse(value)
+  return parsed.success ? normalize(parsed.data) : undefined
+}
+
+/** Canonicalize an entry: copy args in order, sort env keys (order-independent). */
 function normalize(entry: McpServerEntry): McpServerEntry {
-  return {
-    command: entry.command,
-    args: [...entry.args],
-    ...(entry.env && Object.keys(entry.env).length > 0 ? { env: { ...entry.env } } : {}),
+  const out: McpServerEntry = { command: entry.command, args: [...entry.args] }
+  const env = entry.env
+  if (env && Object.keys(env).length > 0) {
+    const sorted: Record<string, string> = {}
+    for (const k of Object.keys(env).sort()) {
+      const v = env[k]
+      if (v !== undefined) sorted[k] = v
+    }
+    out.env = sorted
   }
+  return out
 }
 
 function sameEntry(a: McpServerEntry, b: McpServerEntry): boolean {
@@ -119,12 +144,19 @@ export function mcpInstallCommand(opts: InstallOptions): InstallResult {
 
   const current = servers[serverName]
   if (current !== undefined) {
-    const currentEntry = current as McpServerEntry
-    if (sameEntry(currentEntry, entry)) {
+    // A malformed existing value (null/array/string) coerces to undefined — a
+    // conflict (refuse without force), never a crash.
+    const currentEntry = coerceEntry(current)
+    if (currentEntry && sameEntry(currentEntry, entry)) {
       return { action: 'unchanged', serverName, path: opts.host.path }
     }
     if (!opts.force) {
-      return { action: 'conflict', serverName, path: opts.host.path, existing: currentEntry }
+      return {
+        action: 'conflict',
+        serverName,
+        path: opts.host.path,
+        ...(currentEntry ? { existing: currentEntry } : {}),
+      }
     }
   }
 

@@ -350,6 +350,11 @@ describe('run commands', () => {
     await run(argv('run', 'list', '--state', 'abandoned'), deps)
     expect(out).toContain('no runs')
   })
+
+  it('list rejects an invalid --state', async () => {
+    deps.launchDaemon()
+    await expect(run(argv('run', 'list', '--state', 'bogus'), deps)).rejects.toThrow(/--state must/)
+  })
 })
 
 describe('init', () => {
@@ -414,6 +419,10 @@ describe('mcp install/uninstall', () => {
 
     await run(argv('mcp', 'uninstall'), deps)
     expect(out.join('\n')).toMatch(/removed 'open-consensus'/)
+  })
+
+  it('rejects --arg without --command', async () => {
+    await expect(run(argv('mcp', 'install', '--arg', 'x'), deps)).rejects.toThrow(/--arg only/)
   })
 
   it('honors a custom --name and --config', async () => {

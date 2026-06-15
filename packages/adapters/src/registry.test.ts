@@ -44,6 +44,12 @@ describe('real adapters', () => {
       'mock',
       'opencode',
     ])
+    // The CLI excludes the test-only mock so `init` never auto-seeds it.
+    expect([...defaultRegistry({ includeMock: false }).keys()].sort()).toEqual([
+      'claude',
+      'codex',
+      'gemini',
+    ])
     expect(createAdapter('nope')).toBeUndefined()
   })
 

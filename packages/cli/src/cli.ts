@@ -15,8 +15,12 @@ import { daemonDiscoveryPath, startDaemon } from '@open-consensus/daemon'
 import { CommanderError } from 'commander'
 import { resolveConfigFile, run } from './program'
 
-/** The daemon needs every real adapter; the unsandboxed opt-in was gated at config time. */
-const daemonRegistry = () => defaultRegistry({ includeUnsandboxed: true })
+/**
+ * The CLI/daemon registry: every REAL adapter, with the test-only `mock`
+ * excluded so `init`/`agent` never auto-seed it. The unsandboxed opt-in is
+ * included because that risk was already acknowledged at config time (D20).
+ */
+const daemonRegistry = () => defaultRegistry({ includeUnsandboxed: true, includeMock: false })
 
 /** Resolve when a shutdown signal arrives (the foreground `daemon serve` loop). */
 function waitForShutdown(): Promise<void> {

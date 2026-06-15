@@ -76,12 +76,19 @@ function parsePositiveInt(value: string, label: string): number {
   return n
 }
 
-/** Parse repeated `--env KEY=VALUE` flags into a record. */
+/**
+ * Parse repeated `--env KEY=VALUE` flags into a record. A malformed pair could
+ * contain a secret (e.g. `API_KEYsk-...`), so the error never echoes the raw
+ * value — only the key portion before the (missing/leading) separator.
+ */
 function parseEnv(pairs: string[]): Record<string, string> {
   const env: Record<string, string> = {}
   for (const pair of pairs) {
     const eq = pair.indexOf('=')
-    if (eq <= 0) throw new CliError(`--env must be KEY=VALUE (got '${pair}')`)
+    if (eq <= 0) {
+      const key = eq === 0 ? '' : pair.split(/[^A-Za-z0-9_]/, 1)[0]
+      throw new CliError(`--env must be KEY=VALUE (e.g. FOO=bar); could not parse key '${key}'`)
+    }
     env[pair.slice(0, eq)] = pair.slice(eq + 1)
   }
   return env
@@ -372,7 +379,10 @@ function buildRunCommands(program: Command, deps: CliDeps, ensureOpts: EnsureOpt
     .command('list')
     .description('list runs the daemon knows about')
     .option('--state <state>', 'filter by state (running|abandoned)')
-    .action(async (opts: { state?: 'running' | 'abandoned' }) => {
+    .action(async (opts: { state?: string }) => {
+      if (opts.state !== undefined && opts.state !== 'running' && opts.state !== 'abandoned') {
+        throw new CliError(`--state must be 'running' or 'abandoned' (got '${opts.state}')`)
+      }
       const runs = await listRunsCommand(deps.discoveryPath, opts.state)
       if (runs.length === 0) {
         deps.out('no runs')
@@ -453,6 +463,9 @@ function buildMcpCommands(program: Command, deps: CliDeps): void {
     .option('--arg <value>', 'arg for the MCP server command (repeatable)', collect, [])
     .option('--force', 'overwrite a conflicting existing entry')
     .action((opts) => {
+      if (opts.arg.length > 0 && !opts.command) {
+        throw new CliError('--arg only applies with --command (it sets that command’s args)')
+      }
       const result = mcpInstallCommand({
         host: {
           path: opts.config ?? deps.mcpHostPath,

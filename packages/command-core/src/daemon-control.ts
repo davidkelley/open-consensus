@@ -204,6 +204,10 @@ export function spawnDetachedDaemon(launcher: DaemonLauncher): ChildProcess {
     stdio: 'ignore',
     env: { ...process.env, ...launcher.env },
   })
+  // A detached child emits 'error' asynchronously if the executable can't be
+  // spawned (e.g. ENOENT). Swallow it here so it isn't an unhandled exception in
+  // the parent — the real failure surfaces as `ensureDaemonRunning` timing out.
+  child.on('error', () => {})
   child.unref()
   return child
 }
@@ -280,8 +284,14 @@ export interface StopDaemonResult {
 /**
  * Stop a running daemon by signalling its serve process (`SIGTERM` by default,
  * which the serve handler turns into a graceful drain + shutdown). Waits, bounded,
- * for the process to exit. Safe + idempotent: a missing daemon or an
- * already-dead PID reports cleanly rather than throwing.
+ * for the process to exit. Safe + idempotent: a missing daemon or an already-dead
+ * PID reports cleanly rather than throwing.
+ *
+ * Crucially, it **only signals a PID it has confirmed is our daemon** — it first
+ * health-checks the discovered endpoint (which answers only with our token). If
+ * the daemon isn't responding, the discovery file is treated as stale and **no
+ * signal is sent**, so a recycled PID now owned by an unrelated process is never
+ * killed (the reviewer-flagged PID-reuse hazard).
  */
 export async function stopDaemonCommand(
   discoveryPath: string,
@@ -293,6 +303,13 @@ export async function stopDaemonCommand(
     return { stopped: false, reason: 'daemon discovery has no pid; cannot signal it' }
   }
   const pid = discovery.pid
+  if (!(await waitForReady(discovery, { attempts: 1, intervalMs: 0 }))) {
+    return {
+      stopped: false,
+      pid,
+      reason: `daemon at ${discovery.endpoint} is not responding; not signalling pid ${pid} (it may be stale/reused). Remove the discovery file or kill it manually if it is wedged.`,
+    }
+  }
   try {
     process.kill(pid, opts.signal ?? 'SIGTERM')
   } catch (err) {
