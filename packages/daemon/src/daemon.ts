@@ -151,25 +151,28 @@ export class DaemonCore {
     prompt: string,
     idempotencyKey?: string,
   ): { runId: string; roundId: string } | { error: string } {
-    const panel = resolvePanel(this.config, this.adapters, panelId)
-    if (!panel) return { error: `unknown panel '${panelId}'` }
-    if (panel.agents.length === 0) return { error: `panel '${panelId}' has no resolvable agents` }
-    // Durable dedup (D12), scoped to (panel, key) so the same key for a different
-    // panel can't return an unrelated run. A replayed call returns the original
-    // run/round; the FK guarantees that mapping still references a live run.
-    if (idempotencyKey) {
-      const key = `start:${panelId}:${idempotencyKey}`
+    // Idempotency lookup FIRST (D12): a replay returns the original result even if
+    // the panel was reconfigured since — the original call already succeeded.
+    // Scoped to (panel, key) so the same key for a different panel can't return an
+    // unrelated run; the FK guarantees the mapping still references a live run.
+    const key = idempotencyKey ? `start:${panelId}:${idempotencyKey}` : undefined
+    if (key) {
       const existing = this.store.getIdempotent(key)
       if (existing) {
         this.touch(existing.runId)
         return existing
       }
-      const run = this.engine.createRun(panelId)
-      const roundId = this.beginRound(run, panel, prompt)
-      const winner = this.store.reserveIdempotent(key, run.runId, roundId)
-      // winner !== ours only if a concurrent caller raced us (cannot happen on a
-      // single-instance, single-threaded daemon) — return the canonical mapping.
-      return winner
+    }
+    const panel = resolvePanel(this.config, this.adapters, panelId)
+    if (!panel) return { error: `unknown panel '${panelId}'` }
+    if (panel.agents.length === 0) return { error: `panel '${panelId}' has no resolvable agents` }
+    if (key) {
+      // Reserve the key ATOMICALLY with the run row (engine creates both in one
+      // transaction). The roundId is pre-generated so it goes into that mapping.
+      const roundId = randomUUID()
+      const run = this.engine.createRun(panelId, { idempotency: { key, roundId } })
+      this.beginRound(run, panel, prompt, roundId)
+      return { runId: run.runId, roundId }
     }
     const run = this.engine.createRun(panelId)
     const roundId = this.beginRound(run, panel, prompt)
@@ -183,28 +186,27 @@ export class DaemonCore {
   ): { roundId: string } | { error: string } {
     const run = this.store.getRun(runId)
     if (!run) return { error: `unknown run '${runId}'` }
-    if (run.state !== 'running') return { error: `run '${runId}' is ${run.state}` }
-    const panel = resolvePanel(this.config, this.adapters, run.panelId)
-    if (!panel) return { error: `panel '${run.panelId}' is no longer resolvable` }
-    // Dedup scoped to (runId, key) — the runId is in the storage key, so a key is
-    // structurally bound to its run and never collides with a start key (D12).
-    if (idempotencyKey) {
-      const key = `round:${runId}:${idempotencyKey}`
+    // Idempotency lookup before the run-state check (D12): a replay returns the
+    // original round even if the run has since been parked. Scoped to (runId, key)
+    // — the runId is in the storage key, so it can never collide with a start key.
+    const key = idempotencyKey ? `round:${runId}:${idempotencyKey}` : undefined
+    if (key) {
       const existing = this.store.getIdempotent(key)
       if (existing) {
         this.touch(runId)
         return { roundId: existing.roundId }
       }
-      const roundId = this.beginRound(run, panel, prompt)
-      return { roundId: this.store.reserveIdempotent(key, runId, roundId).roundId }
     }
+    if (run.state !== 'running') return { error: `run '${runId}' is ${run.state}` }
+    const panel = resolvePanel(this.config, this.adapters, run.panelId)
+    if (!panel) return { error: `panel '${run.panelId}' is no longer resolvable` }
     const roundId = this.beginRound(run, panel, prompt)
+    if (key) this.store.reserveIdempotent(key, runId, roundId)
     return { roundId }
   }
 
   /** Dispatch a round in the background; track it so callers can poll/cancel. */
-  private beginRound(run: RunRecord, panel: Panel, prompt: string): string {
-    const roundId = randomUUID()
+  private beginRound(run: RunRecord, panel: Panel, prompt: string, roundId = randomUUID()): string {
     const abort = new AbortController()
     const promise = this.engine
       .dispatchRound(run, panel, prompt, { signal: abort.signal, roundId })

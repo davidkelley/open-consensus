@@ -98,6 +98,11 @@ describe('Engine.dispatchRound', () => {
     expect(store.getRound('fixed-round-id')?.verdict).toBe('met')
   })
 
+  it('createRun reserves an idempotency key atomically with the run row', () => {
+    const run = engine.createRun('p', { idempotency: { key: 'start:p:k', roundId: 'rd-x' } })
+    expect(store.getIdempotent('start:p:k')).toEqual({ runId: run.runId, roundId: 'rd-x' })
+  })
+
   it('abandons a run with a durable run-abandoned event', () => {
     const run = engine.createRun('p')
     engine.abandonRun(run.runId)

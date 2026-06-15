@@ -92,6 +92,22 @@ describe('DaemonCore runs', () => {
     await h.core.drain()
   })
 
+  it('a replayed round returns the original even after the run is parked (D12)', async () => {
+    const started = h.core.startRun('p-ok', 'x')
+    if (!('runId' in started)) throw new Error('start failed')
+    await h.core.waitRound(started.runId, started.roundId, 5000)
+    const r = h.core.startRound(started.runId, 'two', 'rk')
+    if (!('roundId' in r)) throw new Error('round failed')
+    await h.core.drain()
+    h.core.engine.abandonRun(started.runId)
+    // The replay returns the original round despite the run now being parked...
+    expect(h.core.startRound(started.runId, 'whatever', 'rk')).toEqual(r)
+    // ...but a NEW key on a parked run still hits the state guard.
+    expect(h.core.startRound(started.runId, 'fresh', 'new-key')).toEqual({
+      error: `run '${started.runId}' is abandoned`,
+    })
+  })
+
   it('dedups a replayed start by idempotency key across a daemon restart (D12)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'oc-idem-'))
     const dbPath = join(dir, 'db.sqlite')

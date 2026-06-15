@@ -61,11 +61,12 @@ function parse<T>(res: DaemonResponse): T {
   if (res.status < 200 || res.status >= 300) {
     let message = res.body
     try {
-      message = (JSON.parse(res.body) as { error?: string }).error ?? res.body
+      const parsed = (JSON.parse(res.body) as { error?: unknown }).error
+      if (typeof parsed === 'string') message = parsed
     } catch {
       /* non-JSON error body */
     }
-    throw new DaemonError(res.status, message.slice(0, MAX_ERROR_CHARS))
+    throw new DaemonError(res.status, String(message).slice(0, MAX_ERROR_CHARS))
   }
   return JSON.parse(res.body) as T
 }

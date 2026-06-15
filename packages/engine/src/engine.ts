@@ -189,18 +189,29 @@ export class Engine {
     })
   }
 
-  createRun(panelId: string): RunRecord {
+  createRun(
+    panelId: string,
+    opts: { idempotency?: { key: string; roundId: string } } = {},
+  ): RunRecord {
     const run: RunRecord = {
       runId: randomUUID(),
       panelId,
       state: 'running',
       createdAt: this.now(),
     }
-    this.persistWith(run.runId, () => this.store.createRun(run), {
-      type: 'run-created',
-      runId: run.runId,
-      panelId,
-    })
+    this.persistWith(
+      run.runId,
+      () => {
+        this.store.createRun(run)
+        // Reserve the idempotency key in the SAME transaction as the run row, so a
+        // crash can never leave a run with no dedup mapping (a retry would then
+        // duplicate work) — closing the create-then-record window (D12).
+        if (opts.idempotency) {
+          this.store.reserveIdempotent(opts.idempotency.key, run.runId, opts.idempotency.roundId)
+        }
+      },
+      { type: 'run-created', runId: run.runId, panelId },
+    )
     return run
   }
 
