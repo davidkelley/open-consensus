@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { delimiter, isAbsolute, join } from 'node:path'
 import { type RunResult, runProcess } from '@open-consensus/proc'
 import type { AdapterParseResult, DetectResult } from './types'
@@ -22,9 +22,45 @@ const VERSION_TIMEOUT_MS = 10_000
 export function resolveBinaryPath(name: string, pathEnv = process.env.PATH ?? ''): string {
   if (name.includes('/') || name.includes('\\') || isAbsolute(name)) return name
   for (const dir of pathEnv.split(delimiter)) {
-    if (dir && existsSync(join(dir, name))) return join(dir, name)
+    if (!dir) continue
+    const candidate = join(dir, name)
+    if (isFile(candidate)) return candidate // skip a same-named directory on PATH
   }
   return name
+}
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+const MANDATORY_FLAG_SET = new Set<string>()
+
+/**
+ * Throw if config `args` would defeat an adapter's mandatory flags: a `--`
+ * option-terminator (a parser-independent bypass — it would turn the trailing
+ * safety flags into positionals) or any of the adapter's own control flags. This
+ * is parser-independent (doesn't rely on the CLI's first/last-wins behavior). The
+ * adapter is the last line of defense; the CLI's `agent add` also pre-validates.
+ * It does NOT catch every read-only-defeating flag (e.g. claude `--allowedTools`)
+ * — that residual is the user's documented responsibility (D20, best-effort).
+ */
+export function assertSafeArgs(args: readonly string[], forbidden: readonly string[]): void {
+  const deny = forbidden.length ? new Set(forbidden) : MANDATORY_FLAG_SET
+  for (const arg of args) {
+    if (arg === '--') {
+      throw new Error('config arg "--" is not allowed: it would defeat the adapter safety flags')
+    }
+    const name = arg.split('=')[0] ?? arg
+    if (deny.has(name)) {
+      throw new Error(
+        `config arg "${name}" conflicts with a mandatory adapter flag and is not allowed`,
+      )
+    }
+  }
 }
 
 /** A per-adapter binary resolver that resolves the path once, lazily. */
@@ -36,25 +72,37 @@ export function lazyBinary(binPath: string): () => string {
   }
 }
 
-/**
- * Parse a JSON object a CLI may have wrapped in a stray banner/progress line: try
- * a direct parse, then the first `{`..last `}` span. Returns `undefined` when the
- * output isn't JSON (callers then fall back to raw text).
- */
-export function parseJsonLoose(text: string): unknown {
+function tryParse(text: string): unknown {
   try {
     return JSON.parse(text)
   } catch {
-    /* try to extract a JSON span below */
+    return undefined // JSON.parse never returns undefined, so it's a safe sentinel
+  }
+}
+
+/**
+ * Parse a JSON envelope a CLI may have wrapped in banner/progress lines: (1) a
+ * direct parse; (2) the LAST object line — handles JSONL/streaming output where
+ * the final result is the last `{...}` line; (3) the first `{`..last `}` span —
+ * handles a single object spanning lines with surrounding text. Returns
+ * `undefined` when none parse (callers fall back to raw text).
+ */
+export function parseJsonLoose(text: string): unknown {
+  const direct = tryParse(text)
+  if (direct !== undefined) return direct
+  const lines = text.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]?.trim()
+    if (line?.startsWith('{')) {
+      const parsed = tryParse(line)
+      if (parsed !== undefined) return parsed
+    }
   }
   const start = text.indexOf('{')
   const end = text.lastIndexOf('}')
   if (start >= 0 && end > start) {
-    try {
-      return JSON.parse(text.slice(start, end + 1))
-    } catch {
-      /* not JSON */
-    }
+    const parsed = tryParse(text.slice(start, end + 1))
+    if (parsed !== undefined) return parsed
   }
   return undefined
 }

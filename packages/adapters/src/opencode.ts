@@ -1,5 +1,11 @@
 import type { RunResult } from '@open-consensus/proc'
-import { type AdapterOptions, lazyBinary, nonExitedResult, probeVersion } from './shared'
+import {
+  type AdapterOptions,
+  assertSafeArgs,
+  lazyBinary,
+  nonExitedResult,
+  probeVersion,
+} from './shared'
 import type {
   Adapter,
   AdapterInvocation,
@@ -28,7 +34,10 @@ export function createOpencodeAdapter(options: AdapterOptions = {}): Adapter {
     detect: () => probeVersion(bin()),
     buildInvocation(ctx: AdapterInvocationContext): AdapterInvocation {
       const args = ['run']
-      if (ctx.args) args.push(...ctx.args)
+      if (ctx.args) {
+        assertSafeArgs(ctx.args, []) // reject a config `--` so our prompt guard holds
+        args.push(...ctx.args)
+      }
       if (ctx.model) args.push('--model', ctx.model)
       args.push('--', ctx.prompt) // end-of-options, then the message positional
       return { file: bin(), args, env: ctx.env ?? {} }

@@ -1,11 +1,20 @@
 import type { RunResult } from '@open-consensus/proc'
-import { type AdapterOptions, lazyBinary, nonExitedResult, probeVersion } from './shared'
+import {
+  type AdapterOptions,
+  assertSafeArgs,
+  lazyBinary,
+  nonExitedResult,
+  probeVersion,
+} from './shared'
 import type {
   Adapter,
   AdapterInvocation,
   AdapterInvocationContext,
   AdapterParseResult,
 } from './types'
+
+/** Config args that would defeat codex's read-only sandbox (D20). */
+const FORBIDDEN = ['--sandbox', '--dangerously-bypass-approvals-and-sandbox']
 
 /**
  * Codex adapter (plan D8): `codex exec` non-interactive in a `read-only` sandbox.
@@ -27,7 +36,10 @@ export function createCodexAdapter(options: AdapterOptions = {}): Adapter {
     detect: () => probeVersion(bin()),
     buildInvocation(ctx: AdapterInvocationContext): AdapterInvocation {
       const args = ['exec']
-      if (ctx.args) args.push(...ctx.args)
+      if (ctx.args) {
+        assertSafeArgs(ctx.args, FORBIDDEN)
+        args.push(...ctx.args)
+      }
       if (ctx.model) args.push('--model', ctx.model)
       args.push('--sandbox', 'read-only', '--skip-git-repo-check') // last: wins
       return { file: bin(), args, env: ctx.env ?? {}, stdin: ctx.prompt }

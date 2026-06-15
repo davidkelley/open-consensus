@@ -1,6 +1,7 @@
 import type { RunResult } from '@open-consensus/proc'
 import {
   type AdapterOptions,
+  assertSafeArgs,
   lazyBinary,
   nonExitedResult,
   parseJsonLoose,
@@ -12,6 +13,9 @@ import type {
   AdapterInvocationContext,
   AdapterParseResult,
 } from './types'
+
+/** Config args that would defeat gemini's read-only/JSON defaults (D20). */
+const FORBIDDEN = ['--approval-mode', '-o', '--output-format', '-y', '--yolo']
 
 /**
  * Gemini adapter (plan D8): `gemini -p <prompt>` non-interactive, `--approval-mode
@@ -34,7 +38,10 @@ export function createGeminiAdapter(options: AdapterOptions = {}): Adapter {
     detect: () => probeVersion(bin()),
     buildInvocation(ctx: AdapterInvocationContext): AdapterInvocation {
       const args = ['-p', ctx.prompt]
-      if (ctx.args) args.push(...ctx.args)
+      if (ctx.args) {
+        assertSafeArgs(ctx.args, FORBIDDEN)
+        args.push(...ctx.args)
+      }
       if (ctx.model) args.push('-m', ctx.model)
       args.push('--approval-mode', 'plan', '-o', 'json') // last: wins
       return { file: bin(), args, env: ctx.env ?? {} }

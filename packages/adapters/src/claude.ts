@@ -1,6 +1,7 @@
 import type { RunResult } from '@open-consensus/proc'
 import {
   type AdapterOptions,
+  assertSafeArgs,
   lazyBinary,
   nonExitedResult,
   parseJsonLoose,
@@ -13,12 +14,15 @@ import type {
   AdapterParseResult,
 } from './types'
 
+/** Config args that would defeat claude's read-only/JSON defaults (D20). */
+const FORBIDDEN = ['--output-format', '--permission-mode']
+
 /**
  * Claude Code adapter (plan D8): `claude -p` non-interactive, `--output-format
  * json` for a parseable envelope, and `--permission-mode plan` as the read-only
  * default (plan mode analyzes without editing). The prompt is delivered on stdin
- * (avoids argv/`ps` leakage, D5). The mandatory safety/output flags are appended
- * LAST so a stray config `arg` can't override them (CLI parsers take last-wins).
+ * (avoids argv/`ps` leakage, D5). Config args are validated (no `--` terminator,
+ * no conflicting safety flag) and the mandatory flags are appended last.
  */
 export function createClaudeAdapter(options: AdapterOptions = {}): Adapter {
   const bin = lazyBinary(options.binPath ?? 'claude')
@@ -33,7 +37,10 @@ export function createClaudeAdapter(options: AdapterOptions = {}): Adapter {
     detect: () => probeVersion(bin()),
     buildInvocation(ctx: AdapterInvocationContext): AdapterInvocation {
       const args = ['-p']
-      if (ctx.args) args.push(...ctx.args)
+      if (ctx.args) {
+        assertSafeArgs(ctx.args, FORBIDDEN)
+        args.push(...ctx.args)
+      }
       if (ctx.model) args.push('--model', ctx.model)
       args.push('--output-format', 'json', '--permission-mode', 'plan') // last: wins
       return { file: bin(), args, env: ctx.env ?? {}, stdin: ctx.prompt }

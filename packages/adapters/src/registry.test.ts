@@ -230,11 +230,45 @@ describe('real adapters', () => {
     expect(detected.reason).toContain('3')
   })
 
-  it('resolveBinaryPath resolves a bare name on PATH and passes a path through', () => {
+  it('resolveBinaryPath resolves a bare name on PATH, skips dirs, passes a path through', () => {
     expect(resolveBinaryPath('/abs/path')).toBe('/abs/path')
     expect(resolveBinaryPath('definitely-not-a-real-bin-xyz')).toBe('definitely-not-a-real-bin-xyz')
     const node = resolveBinaryPath('node')
     expect(node === 'node' || node.endsWith('node')).toBe(true) // resolved when present
+    expect(resolveBinaryPath('etc', '/')).toBe('etc') // /etc is a directory -> not matched
+  })
+
+  it('rejects config args that would defeat the read-only safety flags (D20)', () => {
+    const claude = createAdapter('claude', { binPath: FAKE }) as Adapter
+    expect(() =>
+      claude.buildInvocation({ ...ctxFor(), args: ['--permission-mode', 'default'] }),
+    ).toThrow(/conflicts/)
+    expect(() => claude.buildInvocation({ ...ctxFor(), args: ['--'] })).toThrow(/not allowed/)
+    expect(() => claude.buildInvocation({ ...ctxFor(), args: ['--output-format=text'] })).toThrow()
+    expect(() => claude.buildInvocation({ ...ctxFor(), args: ['--verbose'] })).not.toThrow()
+
+    const codex = createAdapter('codex', { binPath: FAKE }) as Adapter
+    expect(() =>
+      codex.buildInvocation({ ...ctxFor(), args: ['--sandbox', 'danger-full-access'] }),
+    ).toThrow()
+    const gemini = createAdapter('gemini', { binPath: FAKE }) as Adapter
+    expect(() => gemini.buildInvocation({ ...ctxFor(), args: ['--yolo'] })).toThrow()
+    const opencode = createAdapter('opencode', { binPath: FAKE }) as Adapter
+    expect(() => opencode.buildInvocation({ ...ctxFor(), args: ['--'] })).toThrow()
+  })
+
+  it('parseJsonLoose handles JSONL/streaming + a multi-line object with a banner', async () => {
+    const gemini = createAdapter('gemini', { binPath: FAKE }) as Adapter
+    // JSONL: the final result is the last object line.
+    const jsonl = await run(gemini, ctxFor(), {
+      FAKE_STDOUT: '{"progress":1}\n{"response":"final"}',
+    })
+    expect(gemini.parse(jsonl, ctxFor()).text).toBe('final')
+    // A single object spanning lines, wrapped by a banner -> first {..last } span.
+    const spanned = await run(gemini, ctxFor(), {
+      FAKE_STDOUT: 'Update available!\n{\n  "response": "spanned"\n}\nbye',
+    })
+    expect(gemini.parse(spanned, ctxFor()).text).toBe('spanned')
   })
 
   it('claude surfaces a drifted envelope shape and parses banner-wrapped JSON', async () => {
