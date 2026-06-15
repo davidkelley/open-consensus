@@ -162,11 +162,13 @@ describe('DaemonCore cancellation', () => {
     expect(snap.round?.verdict).toBe('failed')
   })
 
-  it('cancels a single round and reports a miss for an unknown round', async () => {
+  it('cancels a round only for its owner and reports a miss otherwise', async () => {
     const started = h.core.startRun('p-slow', 'long')
     if (!('runId' in started)) throw new Error('start failed')
-    expect(h.core.cancelRound(started.roundId)).toEqual({ cancelled: true })
-    expect(h.core.cancelRound('no-such-round')).toEqual({ cancelled: false })
+    // A different run id must not cancel another run's round.
+    expect(h.core.cancelRound('other-run', started.roundId)).toEqual({ cancelled: false })
+    expect(h.core.cancelRound(started.runId, started.roundId)).toEqual({ cancelled: true })
+    expect(h.core.cancelRound(started.runId, 'no-such-round')).toEqual({ cancelled: false })
     await h.core.drain()
   })
 })

@@ -203,6 +203,9 @@ export class Engine {
     const roundId = options.roundId ?? randomUUID()
     const index = this.store.countRounds(run.runId)
     const agentIds = panel.agents.map((a) => a.agentId)
+    // The prompt is user-supplied and may carry a pasted secret, so the PERSISTED
+    // + served copy is redacted (D10); agents still receive the original prompt.
+    const safePrompt = redactString(prompt)
     // Atomically start the round, insert a `pending` row for EVERY agent, and log
     // round-started — so a crash mid-setup never leaves a `running` round with a
     // partial agent set that reconcile would mis-verdict (D15).
@@ -210,7 +213,14 @@ export class Engine {
       run.runId,
       () =>
         this.store.startRoundWithPending(
-          { roundId, runId: run.runId, index, prompt, quorum: panel.quorum, state: 'running' },
+          {
+            roundId,
+            runId: run.runId,
+            index,
+            prompt: safePrompt,
+            quorum: panel.quorum,
+            state: 'running',
+          },
           agentIds,
         ),
       { type: 'round-started', runId: run.runId, roundId, index, agentIds },
@@ -243,7 +253,7 @@ export class Engine {
       roundId,
       runId: run.runId,
       index,
-      prompt,
+      prompt: safePrompt,
       quorum: panel.quorum,
       state: 'complete',
       verdict,

@@ -212,11 +212,12 @@ export class DaemonCore {
     return { cancelled }
   }
 
-  /** Cancel a single in-flight round. */
-  cancelRound(roundId: string): { cancelled: boolean } {
+  /** Cancel a single in-flight round — only if it belongs to `runId` (so a
+   * known round id can't be cancelled from another run's path). */
+  cancelRound(runId: string, roundId: string): { cancelled: boolean } {
     const inflight = this.inflight.get(roundId)
-    if (!inflight) return { cancelled: false }
-    this.touch(inflight.runId)
+    if (!inflight || inflight.runId !== runId) return { cancelled: false }
+    this.touch(runId)
     inflight.abort.abort()
     return { cancelled: true }
   }

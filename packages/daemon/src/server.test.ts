@@ -27,7 +27,7 @@ const config: Config = parseConfig({
 
 const TOKEN = 'test-token-12345'
 
-function makeServer(opts: { maxBodyBytes?: number } = {}) {
+function makeServer(opts: { maxBodyBytes?: number; maxSseClients?: number } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'oc-srv-'))
   const store = new EngineStore({ dbPath: ':memory:', rawDir: join(dir, 'raw') })
   const core = new DaemonCore({ store, config, adapters: registry, maxWaitMs: 5000 })
@@ -35,6 +35,7 @@ function makeServer(opts: { maxBodyBytes?: number } = {}) {
     core,
     token: TOKEN,
     ...(opts.maxBodyBytes !== undefined ? { maxBodyBytes: opts.maxBodyBytes } : {}),
+    ...(opts.maxSseClients !== undefined ? { maxSseClients: opts.maxSseClients } : {}),
   })
   return {
     server,
@@ -283,6 +284,17 @@ describe('DaemonServer over loopback', () => {
     expect(
       (await daemonRequest(endpoint, TOKEN, { method: 'GET', path: '/runs/x/mystery' })).status,
     ).toBe(404)
+    // A malformed percent-encoded path is a 400, not a 500.
+    expect((await daemonRequest(endpoint, TOKEN, { method: 'GET', path: '/%ZZ' })).status).toBe(400)
+    // maxBytes above the server cap is clamped, not rejected.
+    expect(
+      (
+        await daemonRequest(endpoint, TOKEN, {
+          method: 'GET',
+          path: '/raw?ref=missing&maxBytes=99999999',
+        })
+      ).status,
+    ).toBe(200)
   })
 
   it('404s a poll for an unknown round or a run/round mismatch', async () => {
@@ -339,6 +351,19 @@ describe('DaemonServer edge cases', () => {
       body: { panel: 'p-ok', prompt: 'x'.repeat(500) },
     })
     expect(res.status).toBe(413)
+    await h.cleanup()
+  })
+
+  it('caps concurrent SSE clients with 503', async () => {
+    const h = makeServer({ maxSseClients: 1 })
+    const endpoint = await h.start()
+    const first = openEvents(endpoint)
+    await first.ready
+    const second = openEvents(endpoint)
+    const res = await second.ready
+    expect(res.statusCode).toBe(503)
+    first.close()
+    second.close()
     await h.cleanup()
   })
 

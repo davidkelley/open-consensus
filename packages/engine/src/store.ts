@@ -227,7 +227,12 @@ export class EngineStore {
     } catch {
       return { chunk: '', nextCursor: cursor, eof: true }
     }
-    const end = Math.min(cursor + maxBytes, buf.byteLength)
+    let end = Math.min(cursor + maxBytes, buf.byteLength)
+    // Never split a multi-byte UTF-8 codepoint across a page boundary (a mid-
+    // codepoint cut would decode to U+FFFD and corrupt the reassembled stream).
+    // Advance forward over any continuation bytes so the chunk ends on a boundary
+    // — `maxBytes` is a soft cap that may be exceeded by up to 3 bytes.
+    while (end < buf.byteLength && ((buf[end] as number) & 0xc0) === 0x80) end++
     return {
       chunk: buf.subarray(cursor, end).toString('utf8'),
       nextCursor: end,

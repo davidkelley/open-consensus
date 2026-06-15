@@ -120,6 +120,10 @@ describe('Engine.dispatchRound', () => {
     const raw = store.readRaw(inv?.rawRef as string)
     expect(raw.chunk).not.toContain(secret)
     expect(raw.chunk).toContain('[REDACTED]')
+    // The persisted/served prompt is redacted too (agents got the original).
+    expect(round.prompt).toContain('[REDACTED]')
+    expect(round.prompt).not.toContain(secret)
+    expect(store.getRound(round.roundId)?.prompt).not.toContain(secret)
   })
 
   it('isolates failures and yields a degraded verdict', async () => {

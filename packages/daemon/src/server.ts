@@ -8,6 +8,11 @@ import { clampWaitMs, parseIntParam, startRoundBodySchema, startRunBodySchema } 
 
 const DEFAULT_MAX_BODY_BYTES = 2_000_000
 const DEFAULT_PING_MS = 25_000
+/** Hard ceiling on a single `/raw` page, independent of the client's `maxBytes`. */
+const RAW_PAGE_CAP = 256_000
+/** Receiving a full request must complete within this — bounds slow-body holds. */
+const REQUEST_TIMEOUT_MS = 30_000
+const DEFAULT_MAX_SSE_CLIENTS = 64
 
 export type ListenTarget = { socketPath: string } | { host: string; port: number }
 
@@ -16,6 +21,8 @@ export interface DaemonServerOptions {
   token: string
   maxBodyBytes?: number
   pingMs?: number
+  /** Cap on concurrent SSE connections (excess get 503). */
+  maxSseClients?: number
 }
 
 /**
@@ -98,6 +105,7 @@ export class DaemonServer {
   private readonly token: string
   private readonly maxBodyBytes: number
   private readonly pingMs: number
+  private readonly maxSseClients: number
   /** Set once when bound to loopback: the exact `host:port` we require. */
   private expectedHost: string | undefined
   /** True once `listen()` has bound, so `close()` won't hang on a dead server. */
@@ -110,12 +118,16 @@ export class DaemonServer {
     this.token = opts.token
     this.maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
     this.pingMs = opts.pingMs ?? DEFAULT_PING_MS
+    this.maxSseClients = opts.maxSseClients ?? DEFAULT_MAX_SSE_CLIENTS
     this.http = createServer((req, res) => {
       this.handle(req, res).catch(() => {
         if (!res.headersSent) sendError(res, 500, 'internal error')
         else res.end()
       })
     })
+    // Bound how long a client may take to deliver a full request (slow-body
+    // defense); does not apply to the long-poll/SSE response wait.
+    this.http.requestTimeout = REQUEST_TIMEOUT_MS
   }
 
   /** Begin listening; resolves the published endpoint (socket path / loopback URL). */
@@ -190,7 +202,12 @@ export class DaemonServer {
 
     const url = new URL(req.url ?? '/', 'http://localhost')
     const method = req.method ?? 'GET'
-    const seg = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+    let seg: string[]
+    try {
+      seg = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+    } catch {
+      return sendError(res, 400, 'malformed path') // invalid percent-encoding
+    }
 
     if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { ok: true })
     if (method === 'GET' && url.pathname === '/panels') {
@@ -201,7 +218,11 @@ export class DaemonServer {
       const ref = url.searchParams.get('ref')
       if (!ref) return sendError(res, 400, 'ref is required')
       const cursor = parseIntParam(url.searchParams.get('cursor'), 0)
-      const maxBytes = parseIntParam(url.searchParams.get('maxBytes'), 64_000)
+      // Clamp the page to a server cap so a client can't ask for an unbounded read.
+      const maxBytes = Math.min(
+        parseIntParam(url.searchParams.get('maxBytes'), 64_000),
+        RAW_PAGE_CAP,
+      )
       return sendJson(res, 200, this.core.readRaw(ref, cursor, maxBytes))
     }
     if (url.pathname === '/runs') {
@@ -248,7 +269,7 @@ export class DaemonServer {
     }
     // /runs/:id/rounds/:roundId/cancel
     if (seg.length === 5 && seg[2] === 'rounds' && seg[4] === 'cancel' && method === 'POST') {
-      return sendJson(res, 200, this.core.cancelRound(seg[3] as string))
+      return sendJson(res, 200, this.core.cancelRound(runId, seg[3] as string))
     }
     return sendError(res, 404, 'not found')
   }
@@ -302,6 +323,11 @@ export class DaemonServer {
   // -- SSE ---------------------------------------------------------------
 
   private handleSse(req: IncomingMessage, res: ServerResponse, url: URL): void {
+    // Bound concurrent streams so a flood of connections can't exhaust memory.
+    if (this.sseClients.size >= this.maxSseClients) {
+      sendError(res, 503, 'too many event streams')
+      return
+    }
     res.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
@@ -336,6 +362,7 @@ export class DaemonServer {
     for (;;) {
       const { events, hasMore } = this.core.backfill(since)
       for (const e of events) {
+        if (e.runId) this.core.touch(e.runId) // backfilled SSE traffic also resets the TTL
         writeRaw(e.seq, e.payload)
         since = e.seq
       }
@@ -345,12 +372,18 @@ export class DaemonServer {
 
     const ping = setInterval(() => res.write(': ping\n\n'), this.pingMs)
     if (typeof ping.unref === 'function') ping.unref()
+    let cleanedUp = false
     const cleanup = () => {
+      if (cleanedUp) return
+      cleanedUp = true
       clearInterval(ping)
       unsubscribe()
       this.sseClients.delete(res)
     }
     req.on('close', cleanup)
     res.on('close', cleanup)
+    // A write to a dropped client emits 'error' (EPIPE/ECONNRESET); handle it so
+    // an unhandled stream error can't crash the daemon.
+    res.on('error', cleanup)
   }
 }

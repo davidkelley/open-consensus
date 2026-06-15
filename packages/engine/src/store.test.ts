@@ -66,6 +66,18 @@ describe('EngineStore', () => {
     expect(store.readRaw('missing')).toEqual({ chunk: '', nextCursor: 0, eof: true })
   })
 
+  it('paginates raw without splitting a multi-byte UTF-8 codepoint', () => {
+    // 'aé' is bytes [0x61, 0xC3, 0xA9]; a page ending at byte 2 would cut 'é'.
+    store.writeRaw('u', Buffer.from('aé', 'utf8'))
+    const whole = store.readRaw('u', 0, 2)
+    expect(whole.chunk).toBe('aé') // boundary-safe: pulled the whole codepoint
+    expect(whole.eof).toBe(true)
+    // A clean split at a lead-byte boundary pages without corruption.
+    const a = store.readRaw('u', 0, 1)
+    expect(a).toMatchObject({ chunk: 'a', eof: false })
+    expect(store.readRaw('u', a.nextCursor, 10)).toMatchObject({ chunk: 'é', eof: true })
+  })
+
   it('lists runs, optionally filtered by state', () => {
     store.createRun(run('a'))
     store.createRun({ ...run('b'), state: 'abandoned' })

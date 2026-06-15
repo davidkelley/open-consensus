@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs'
+import { chmodSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { type Config, loadConfig } from '@open-consensus/config'
 import { type AppPaths, appPaths } from '@open-consensus/core'
@@ -65,8 +65,15 @@ export interface RunningDaemon {
  */
 export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaemon> {
   const paths = opts.paths ?? appPaths()
-  mkdirSync(paths.runtime, { recursive: true, mode: 0o700 })
-  mkdirSync(paths.state, { recursive: true })
+  // Persisted state (SQLite + WAL/SHM), raw blobs, and the socket/lock/discovery
+  // files can hold prompts, metadata, and the bearer token — so the directories
+  // holding them are restricted to the owner (0700). chmod tightens a pre-existing
+  // dir too, since mode= only applies on creation. Directory-level 0700 protects
+  // every file inside regardless of the file's own umask-derived mode.
+  for (const dir of [paths.runtime, paths.state, paths.data]) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    chmodSync(dir, 0o700)
+  }
 
   const lockPath = join(paths.runtime, LOCK_NAME)
   const discoveryPath = join(paths.runtime, DISCOVERY_NAME)
@@ -114,8 +121,10 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
       server: boundServer,
       async stop() {
         clearInterval(boundReaper)
-        await core.drain()
+        // Stop accepting requests FIRST so no new round slips in during the drain
+        // and then keeps running after the store is closed.
         await boundServer.close()
+        await core.drain()
         boundStore.close()
         rmSync(discoveryPath, { force: true })
         // Remove the unix socket file (a no-op for a loopback endpoint) so a
