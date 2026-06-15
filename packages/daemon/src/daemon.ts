@@ -155,6 +155,12 @@ export class DaemonCore {
     // the panel was reconfigured since — the original call already succeeded.
     // Scoped to (panel, key) so the same key for a different panel can't return an
     // unrelated run; the FK guarantees the mapping still references a live run.
+    //
+    // This whole method is SYNCHRONOUS up to and including openRun's atomic commit
+    // (no await before the key is persisted). The daemon is a single instance
+    // (proper-lockfile) on a single-threaded event loop, so a concurrent same-key
+    // call cannot interleave between this precheck and the reservation — it always
+    // observes the committed key here. (No multi-writer dedup is needed.)
     const key = idempotencyKey ? `start:${panelId}:${idempotencyKey}` : undefined
     if (key) {
       const existing = this.store.getIdempotent(key)

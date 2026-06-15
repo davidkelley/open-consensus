@@ -250,6 +250,13 @@ export class Engine {
           },
           agentIds,
         )
+        // reserveIdempotent always wins here: the daemon's startRun runs
+        // synchronously through this commit (no await between its getIdempotent
+        // precheck and now) on a single-instance, single-threaded daemon, so a
+        // second same-key call cannot interleave — it observes the committed key
+        // and returns at the precheck. There is therefore no "losing run" to
+        // discard; were the daemon ever made concurrent, this would need a
+        // winner-check + rollback.
         if (options.idempotency)
           this.store.reserveIdempotent(options.idempotency.key, run.runId, roundId)
       },
