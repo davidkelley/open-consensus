@@ -92,9 +92,21 @@ describe('EngineStore', () => {
 
     // The repair is recorded in the durable log (terminal transition for the
     // interrupted agent + the round verdict), so an SSE replay stays consistent.
-    const types = store.readEvents().map((e) => JSON.parse(e.payload).type)
+    const { events, hasMore } = store.readEvents()
+    const types = events.map((e) => JSON.parse(e.payload).type)
+    expect(hasMore).toBe(false)
     expect(types).toContain('invocation-finished')
     expect(types).toContain('round-completed')
+  })
+
+  it('paginates events with a hasMore flag', () => {
+    for (let i = 0; i < 5; i++) store.appendEvent('run1', `{"type":"e${i}"}`)
+    const page1 = store.readEvents(0, 2)
+    expect(page1.events).toHaveLength(2)
+    expect(page1.hasMore).toBe(true)
+    const last = page1.events[1]?.seq ?? 0
+    const page2 = store.readEvents(last, 100)
+    expect(page2.hasMore).toBe(false)
   })
 
   it('prunes a run with its rounds, invocations, and raw blobs', () => {

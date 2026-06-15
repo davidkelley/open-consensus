@@ -244,11 +244,21 @@ export class EngineStore {
     return row ? { ...row, state: row.state as RunState } : undefined
   }
 
-  /** Durable events after `sinceSeq` (snapshot replay + daemon SSE backfill). */
-  readEvents(sinceSeq = 0, limit = 1000): { seq: number; runId: string | null; payload: string }[] {
-    return this.db
+  /**
+   * Durable events after `sinceSeq` (snapshot replay + daemon SSE backfill).
+   * `hasMore` tells the caller to page again (sinceSeq = last seq) so a long run
+   * with > `limit` events is never silently truncated. (Fetches one extra row to
+   * detect truncation precisely.)
+   */
+  readEvents(
+    sinceSeq = 0,
+    limit = 1000,
+  ): { events: { seq: number; runId: string | null; payload: string }[]; hasMore: boolean } {
+    const rows = this.db
       .prepare('SELECT seq, runId, payload FROM events WHERE seq > ? ORDER BY seq LIMIT ?')
-      .all(sinceSeq, limit) as { seq: number; runId: string | null; payload: string }[]
+      .all(sinceSeq, limit + 1) as { seq: number; runId: string | null; payload: string }[]
+    const hasMore = rows.length > limit
+    return { events: hasMore ? rows.slice(0, limit) : rows, hasMore }
   }
 
   countRounds(runId: string): number {
