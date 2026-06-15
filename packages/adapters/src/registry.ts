@@ -28,16 +28,29 @@ export function createAdapter(id: string, options?: AdapterOptions): Adapter | u
   }
 }
 
+export interface RegistryOptions {
+  /**
+   * Include adapters with NO native read-only sandbox (e.g. opencode). Off by
+   * default (D20): such tools are elevated-opt-in only — the caller must pass this
+   * after the user has acknowledged the risk (the CLI's `agent add`, Stage 8/D21).
+   */
+  includeUnsandboxed?: boolean
+}
+
 /**
- * Build the daemon's adapter registry: every built-in real adapter plus the
- * deterministic `mock` (so a mock-backed config still resolves). Unknown ids in a
- * user config are simply not present (the resolver drops them).
+ * Build the daemon's adapter registry: the built-in sandboxed real adapters plus
+ * the deterministic `mock`. Adapters that lack a native sandbox (opencode) are
+ * EXCLUDED unless `includeUnsandboxed` is set, so a default config can never
+ * silently dispatch to an unconstrained tool (D20). Unknown ids in a user config
+ * are simply absent (the resolver drops them).
  */
-export function defaultRegistry(): Map<string, Adapter> {
+export function defaultRegistry(options: RegistryOptions = {}): Map<string, Adapter> {
   const registry = new Map<string, Adapter>()
   for (const id of [...REAL_ADAPTER_IDS, 'mock']) {
     const adapter = createAdapter(id)
-    if (adapter) registry.set(id, adapter)
+    if (!adapter) continue
+    if (!adapter.capabilities.sandbox && !options.includeUnsandboxed) continue
+    registry.set(id, adapter)
   }
   return registry
 }

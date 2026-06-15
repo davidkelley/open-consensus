@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { delimiter, isAbsolute, join } from 'node:path'
 import { type RunResult, runProcess } from '@open-consensus/proc'
 import type { AdapterParseResult, DetectResult } from './types'
 
@@ -7,7 +9,55 @@ export interface AdapterOptions {
   binPath?: string
 }
 
-const VERSION_TIMEOUT_MS = 5000
+const VERSION_TIMEOUT_MS = 10_000
+
+/**
+ * Resolve a bare binary NAME to an absolute path via PATH, honoring the runner's
+ * "file should be an absolute, trusted path" contract and PINNING the resolution
+ * (no per-spawn re-lookup). A path that already contains a separator is returned
+ * unchanged; an unresolved name is returned as-is (the runner then surfaces a
+ * spawn-error -> unavailable). `init` (D21) additionally resolves + lets the user
+ * CONFIRM the binary, so an nvm/asdf-shadowed CLI isn't silently mis-picked.
+ */
+export function resolveBinaryPath(name: string, pathEnv = process.env.PATH ?? ''): string {
+  if (name.includes('/') || name.includes('\\') || isAbsolute(name)) return name
+  for (const dir of pathEnv.split(delimiter)) {
+    if (dir && existsSync(join(dir, name))) return join(dir, name)
+  }
+  return name
+}
+
+/** A per-adapter binary resolver that resolves the path once, lazily. */
+export function lazyBinary(binPath: string): () => string {
+  let resolved: string | undefined
+  return () => {
+    if (resolved === undefined) resolved = resolveBinaryPath(binPath)
+    return resolved
+  }
+}
+
+/**
+ * Parse a JSON object a CLI may have wrapped in a stray banner/progress line: try
+ * a direct parse, then the first `{`..last `}` span. Returns `undefined` when the
+ * output isn't JSON (callers then fall back to raw text).
+ */
+export function parseJsonLoose(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    /* try to extract a JSON span below */
+  }
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(text.slice(start, end + 1))
+    } catch {
+      /* not JSON */
+    }
+  }
+  return undefined
+}
 
 /**
  * Minimal env for the detect probe. The runner drops the inherited env, so detect

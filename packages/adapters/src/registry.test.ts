@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { type RunResult, runProcess } from '@open-consensus/proc'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { REAL_ADAPTER_IDS, capabilityMatrix, createAdapter, defaultRegistry } from './registry'
-import { nonExitedResult, probeVersion } from './shared'
+import { nonExitedResult, probeVersion, resolveBinaryPath } from './shared'
 import type { Adapter, AdapterInvocationContext } from './types'
 
 const FAKE = fileURLToPath(new URL('../test/fixtures/fake-cli.mjs', import.meta.url))
@@ -34,9 +34,16 @@ async function run(
 const ctxFor = (cwd = '/tmp'): AdapterInvocationContext => ({ prompt: 'review this', cwd })
 
 describe('real adapters', () => {
-  it('the registry exposes every real adapter plus mock', () => {
-    const reg = defaultRegistry()
-    expect([...reg.keys()].sort()).toEqual(['claude', 'codex', 'gemini', 'mock', 'opencode'])
+  it('the default registry excludes the unsandboxed opencode (D20 opt-in)', () => {
+    expect([...defaultRegistry().keys()].sort()).toEqual(['claude', 'codex', 'gemini', 'mock'])
+    // opencode is only present with the explicit elevated opt-in.
+    expect([...defaultRegistry({ includeUnsandboxed: true }).keys()].sort()).toEqual([
+      'claude',
+      'codex',
+      'gemini',
+      'mock',
+      'opencode',
+    ])
     expect(createAdapter('nope')).toBeUndefined()
   })
 
@@ -51,15 +58,16 @@ describe('real adapters', () => {
   it('claude: -p/json/plan, prompt on stdin, parses the result envelope', () => {
     const claude = createAdapter('claude', { binPath: FAKE }) as Adapter
     const inv = claude.buildInvocation({ ...ctxFor(), model: 'opus', args: ['--extra'] })
+    // Mandatory safety/output flags come LAST so a config `arg` can't override them.
     expect(inv.args).toEqual([
       '-p',
+      '--extra',
+      '--model',
+      'opus',
       '--output-format',
       'json',
       '--permission-mode',
       'plan',
-      '--model',
-      'opus',
-      '--extra',
     ])
     expect(inv.stdin).toBe('review this')
   })
@@ -84,11 +92,11 @@ describe('real adapters', () => {
     const inv = codex.buildInvocation({ ...ctxFor(), model: 'o3' })
     expect(inv.args).toEqual([
       'exec',
+      '--model',
+      'o3',
       '--sandbox',
       'read-only',
       '--skip-git-repo-check',
-      '--model',
-      'o3',
     ])
     expect(inv.stdin).toBe('review this')
     const result = await run(codex, ctxFor(), { FAKE_STDOUT: 'codex says hello' })
@@ -101,12 +109,12 @@ describe('real adapters', () => {
     expect(inv.args).toEqual([
       '-p',
       'review this',
+      '-m',
+      'gemini-3.1-pro',
       '--approval-mode',
       'plan',
       '-o',
       'json',
-      '-m',
-      'gemini-3.1-pro',
     ])
     expect(inv.stdin).toBeUndefined() // prompt delivered via arg
     const result = await run(gemini, ctxFor(), {
@@ -118,7 +126,8 @@ describe('real adapters', () => {
   it('opencode: run with the message as the trailing positional', async () => {
     const opencode = createAdapter('opencode', { binPath: FAKE }) as Adapter
     const inv = opencode.buildInvocation({ ...ctxFor(), model: 'anthropic/claude' })
-    expect(inv.args).toEqual(['run', '--model', 'anthropic/claude', 'review this'])
+    // `--` guards a prompt that starts with `-` from being read as a flag.
+    expect(inv.args).toEqual(['run', '--model', 'anthropic/claude', '--', 'review this'])
     const result = await run(opencode, ctxFor(), { FAKE_STDOUT: 'oc answer' })
     expect(opencode.parse(result, ctxFor())).toEqual({ status: 'ok', text: 'oc answer' })
   })
@@ -219,5 +228,27 @@ describe('real adapters', () => {
     })
     expect(detected.available).toBe(false)
     expect(detected.reason).toContain('3')
+  })
+
+  it('resolveBinaryPath resolves a bare name on PATH and passes a path through', () => {
+    expect(resolveBinaryPath('/abs/path')).toBe('/abs/path')
+    expect(resolveBinaryPath('definitely-not-a-real-bin-xyz')).toBe('definitely-not-a-real-bin-xyz')
+    const node = resolveBinaryPath('node')
+    expect(node === 'node' || node.endsWith('node')).toBe(true) // resolved when present
+  })
+
+  it('claude surfaces a drifted envelope shape and parses banner-wrapped JSON', async () => {
+    const claude = createAdapter('claude', { binPath: FAKE }) as Adapter
+    // A non-string `result` is schema drift -> error, not a silent empty `ok`.
+    const drift = await run(claude, ctxFor(), { FAKE_STDOUT: JSON.stringify({ result: 42 }) })
+    expect(claude.parse(drift, ctxFor())).toMatchObject({
+      status: 'error',
+      errorClass: 'unparseable-result',
+    })
+    // A stray banner line before the JSON is still parsed (loose extraction).
+    const banner = await run(claude, ctxFor(), {
+      FAKE_STDOUT: `Update available!\n${JSON.stringify({ result: 'hi', is_error: false })}`,
+    })
+    expect(claude.parse(banner, ctxFor())).toEqual({ status: 'ok', text: 'hi' })
   })
 })
