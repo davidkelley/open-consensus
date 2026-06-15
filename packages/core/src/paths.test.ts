@@ -78,12 +78,16 @@ describe('paths', () => {
     )
   })
 
-  it('runtimeDir falls back to a short /tmp on macOS (sun_path limit, D2)', () => {
-    expect(runtimeDir({ HOME }, 'darwin')).toBe('/tmp/open-consensus')
+  // The shared /tmp fallback is uid-scoped so two users can't collide on it.
+  const UID = process.getuid?.() ?? ''
+  const RUNTIME_APP = `open-consensus-${UID}`
+
+  it('uid-scopes the /tmp fallback on macOS (sun_path + predictable-path, D2)', () => {
+    expect(runtimeDir({ HOME }, 'darwin')).toBe(`/tmp/${RUNTIME_APP}`)
   })
 
-  it('runtimeDir falls back to os.tmpdir() off macOS when it is absolute', () => {
-    expect(runtimeDir({ HOME }, 'linux')).toBe(join(tmpdir(), 'open-consensus'))
+  it('runtimeDir falls back to a uid-scoped os.tmpdir() off macOS when absolute', () => {
+    expect(runtimeDir({ HOME }, 'linux')).toBe(join(tmpdir(), RUNTIME_APP))
   })
 
   describe('with a relative TMPDIR off macOS', () => {
@@ -93,7 +97,7 @@ describe('paths', () => {
 
     it('uses /tmp rather than propagating a relative os.tmpdir()', () => {
       vi.stubEnv('TMPDIR', 'relative-tmp')
-      expect(runtimeDir({ HOME }, 'linux')).toBe('/tmp/open-consensus')
+      expect(runtimeDir({ HOME }, 'linux')).toBe(`/tmp/${RUNTIME_APP}`)
     })
   })
 
@@ -112,8 +116,8 @@ describe('paths', () => {
       state: '/home/tester/.local/state/open-consensus',
       data: '/home/tester/.local/share/open-consensus',
       cache: '/home/tester/.cache/open-consensus',
-      runtime: '/tmp/open-consensus',
+      runtime: `/tmp/${RUNTIME_APP}`,
     })
-    expect(appPaths(env, 'linux').runtime).toBe(join(tmpdir(), 'open-consensus'))
+    expect(appPaths(env, 'linux').runtime).toBe(join(tmpdir(), RUNTIME_APP))
   })
 })

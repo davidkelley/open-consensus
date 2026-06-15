@@ -141,9 +141,19 @@ export class DaemonServer {
         this.http.removeListener('error', reject)
         this.listening = true
         if ('socketPath' in target) {
-          // Force 0600 on the socket file itself (umask-independent); the runtime
-          // dir is already 0700, but the socket must not depend on the umask.
-          chmodSync(target.socketPath, 0o600)
+          try {
+            // Force 0600 on the socket file itself (umask-independent); the
+            // runtime dir is already 0700, but the socket must not depend on the
+            // umask.
+            chmodSync(target.socketPath, 0o600)
+          } catch (err) {
+            // A throw here would escape the 'listening' callback and bypass
+            // startDaemon's rollback — close + reject so rollback fires.
+            this.listening = false
+            this.http.close()
+            reject(err)
+            return
+          }
           resolve(target.socketPath)
           return
         }

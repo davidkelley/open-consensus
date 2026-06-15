@@ -93,11 +93,23 @@ export function cacheDir(env?: PathEnv): string {
  */
 export function runtimeDir(env?: PathEnv, platform: NodeJS.Platform = process.platform): string {
   const e = resolveEnv(env)
+  // XDG_RUNTIME_DIR (e.g. /run/user/<uid>) is already a per-user, 0700 directory.
+  if (e.XDG_RUNTIME_DIR !== undefined && isAbsolute(e.XDG_RUNTIME_DIR)) {
+    return join(e.XDG_RUNTIME_DIR, APP)
+  }
   // On darwin the OS temp dir is deep (/var/folders/...), so use the short, safe
   // /tmp; elsewhere prefer the OS temp dir, but only if it resolved absolute.
   const osTmp = tmpdir()
   const fallback = platform === 'darwin' ? '/tmp' : isAbsolute(osTmp) ? osTmp : '/tmp'
-  return join(resolveBase(e.XDG_RUNTIME_DIR, fallback, 'runtime'), APP)
+  // The /tmp fallback is a shared, world-writable, PREDICTABLE location — scope
+  // the app dir by uid so two users can't collide on it (a squatted/symlinked
+  // `/tmp/open-consensus` would otherwise DoS or redirect a victim's daemon, D2).
+  return join(resolveBase(undefined, fallback, 'runtime'), `${APP}${uidSuffix()}`)
+}
+
+/** `-<uid>` on POSIX (scopes a shared /tmp path per-user); empty on Windows. */
+function uidSuffix(): string {
+  return typeof process.getuid === 'function' ? `-${process.getuid()}` : ''
 }
 
 /** All resolved application directories. */

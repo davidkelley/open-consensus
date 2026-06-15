@@ -24,6 +24,13 @@ export interface DaemonLock {
 export interface AcquireLockOptions {
   /** Override the staleness window (tests use a short one). */
   staleMs?: number
+  /**
+   * Called if the lock is LOST to another instance (heartbeat stalled past
+   * `staleMs`, or the lock dir was removed). The caller SHOULD fail-stop here —
+   * continuing means two daemons writing one SQLite DB. Defaults to a no-op so a
+   * lost lock can't crash via an uncaught throw from proper-lockfile's timer.
+   */
+  onCompromised?: () => void
 }
 
 /**
@@ -37,8 +44,9 @@ export function acquireLock(lockPath: string, options: AcquireLockOptions = {}):
       realpath: false, // the lock path itself need not exist; we lock the name
       stale: options.staleMs ?? DEFAULT_STALE_MS,
       // A compromised lock (e.g. its dir deleted out from under us) must not crash
-      // the daemon via an uncaught throw from the heartbeat timer.
-      onCompromised: () => {},
+      // the daemon via an uncaught throw from the heartbeat timer — route it to
+      // the caller's handler (which should fail-stop) instead.
+      onCompromised: options.onCompromised ?? (() => {}),
     })
     return {
       release: () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmodSync, mkdirSync, rmSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { type Config, loadConfig } from '@open-consensus/config'
 import { type AppPaths, appPaths } from '@open-consensus/core'
@@ -67,12 +67,28 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
   // every file inside regardless of the file's own umask-derived mode.
   for (const dir of [paths.runtime, paths.state, paths.data]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
+    // On a shared /tmp another user could have squatted/symlinked the path —
+    // refuse to write into anything that isn't a real directory we own (POSIX).
+    if (typeof process.getuid === 'function') {
+      const st = lstatSync(dir)
+      if (!st.isDirectory() || st.uid !== process.getuid()) {
+        throw new Error(`runtime directory '${dir}' is not a directory owned by you`)
+      }
+    }
     chmodSync(dir, 0o700)
   }
 
   const lockPath = join(paths.runtime, LOCK_NAME)
   const discoveryPath = join(paths.runtime, DISCOVERY_NAME)
-  const lock = acquireLock(lockPath)
+  const lock = acquireLock(lockPath, {
+    // Lost the singleton lock to another instance -> fail-stop, so two daemons
+    // never write the same SQLite DB. In-flight work is sacrificed for integrity;
+    // the orchestrator reconnects to the new daemon via the discovery file.
+    onCompromised: () => {
+      process.stderr.write('open-consensus: daemon lock compromised; exiting\n')
+      process.exit(1)
+    },
+  })
   if (!lock) throw new DaemonAlreadyRunningError()
 
   let store: EngineStore | undefined
