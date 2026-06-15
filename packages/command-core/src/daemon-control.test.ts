@@ -22,6 +22,8 @@ let dir: string
 let discoveryPath: string
 let server: Server
 let endpoint: string
+/** PID the fake /health reports (so stop's identity check can match/mismatch). */
+let healthPid: number | undefined
 const TOKEN = 'test-token'
 
 function isAliveForTest(pid: number | undefined): boolean {
@@ -42,7 +44,9 @@ function startFakeServer(): Promise<void> {
       res.writeHead(status, { 'content-type': 'application/json' })
       res.end(JSON.stringify(body))
     }
-    if (req.method === 'GET' && url === '/health') return send(200, { ok: true })
+    if (req.method === 'GET' && url === '/health') {
+      return send(200, { ok: true, ...(healthPid !== undefined ? { pid: healthPid } : {}) })
+    }
     if (req.method === 'GET' && url === '/panels') {
       return send(200, { panels: [{ id: 'p', name: 'P', agentIds: ['a'], quorum: 1 }] })
     }
@@ -81,6 +85,7 @@ function writeDiscovery(d: { endpoint?: string; token?: string; pid?: number }):
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'oc-daemon-'))
   discoveryPath = join(dir, 'discovery.json')
+  healthPid = undefined
   await startFakeServer()
 })
 afterEach(() => {
@@ -258,15 +263,27 @@ describe('stopDaemonCommand', () => {
     })
   })
 
-  it('signals a live process and waits for it to exit', async () => {
+  it('signals a live process (whose pid /health confirms) and waits for it to exit', async () => {
     const child: ChildProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], {
       stdio: 'ignore',
     })
     await new Promise((r) => setTimeout(r, 50)) // let it start
+    healthPid = child.pid // the live daemon reports this pid — matches discovery
     writeDiscovery({ pid: child.pid })
     const result = await stopDaemonCommand(discoveryPath, { attempts: 100, intervalMs: 20 })
     expect(result.stopped).toBe(true)
     expect(result.pid).toBe(child.pid)
+  })
+
+  it('refuses to signal when /health reports a different pid (stale discovery)', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { stdio: 'ignore' })
+    await new Promise((r) => setTimeout(r, 50))
+    healthPid = 999_999 // the live daemon is a different process than discovery claims
+    writeDiscovery({ pid: child.pid })
+    const result = await stopDaemonCommand(discoveryPath)
+    expect(result).toMatchObject({ stopped: false, reason: expect.stringMatching(/reports pid/) })
+    expect(isAliveForTest(child.pid)).toBe(true) // not signalled
+    child.kill('SIGKILL')
   })
 
   it('refuses to signal a PID when the endpoint is not responding (stale/reused)', async () => {
@@ -294,6 +311,7 @@ describe('stopDaemonCommand', () => {
       { stdio: 'ignore' },
     )
     await new Promise((r) => setTimeout(r, 50))
+    healthPid = child.pid
     writeDiscovery({ pid: child.pid })
     const result = await stopDaemonCommand(discoveryPath, { attempts: 2, intervalMs: 5 })
     expect(result).toMatchObject({ stopped: false, reason: expect.stringMatching(/did not exit/) })
@@ -304,6 +322,7 @@ describe('stopDaemonCommand', () => {
     const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' })
     const pid = child.pid
     await new Promise((r) => child.on('close', r)) // it has fully exited
+    healthPid = pid // /health reports the (now-dead) pid -> identity matches -> we try to signal
     writeDiscovery({ pid })
     const result = await stopDaemonCommand(discoveryPath)
     expect(result).toMatchObject({ stopped: true, reason: expect.stringMatching(/already exited/) })

@@ -279,11 +279,19 @@ export interface RunForegroundDeps {
 export async function runDaemonForeground(deps: RunForegroundDeps): Promise<void> {
   const daemon = await deps.start()
   deps.onStarted?.(daemon.endpoint)
+  let shutdownErr: unknown
   try {
     await deps.waitForShutdown()
-  } finally {
-    await daemon.stop()
+  } catch (err) {
+    shutdownErr = err
   }
+  // Always stop, but don't let a stop() failure mask the original shutdown error.
+  try {
+    await daemon.stop()
+  } catch (stopErr) {
+    if (shutdownErr === undefined) throw stopErr
+  }
+  if (shutdownErr !== undefined) throw shutdownErr
 }
 
 export interface StopDaemonResult {
@@ -292,18 +300,37 @@ export interface StopDaemonResult {
   reason?: string
 }
 
+/** GET /health (token-authenticated); returns the parsed body, or undefined if
+ * the daemon isn't answering / didn't return a 200 JSON body. */
+async function fetchHealth(
+  discovery: Discovery,
+): Promise<{ ok?: boolean; pid?: number } | undefined> {
+  try {
+    const res = await daemonRequest(discovery.endpoint, discovery.token, {
+      method: 'GET',
+      path: '/health',
+      timeoutMs: 2000,
+    })
+    if (res.status !== 200) return undefined
+    return JSON.parse(res.body) as { ok?: boolean; pid?: number }
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Stop a running daemon by signalling its serve process (`SIGTERM` by default,
  * which the serve handler turns into a graceful drain + shutdown). Waits, bounded,
  * for the process to exit. Safe + idempotent: a missing daemon or an already-dead
  * PID reports cleanly rather than throwing.
  *
- * Crucially, it **only signals a PID it has confirmed is our daemon** — it first
- * health-checks the discovered endpoint. `/health` sits behind the daemon's
- * bearer-token check, so a `200` proves the listener holds our token (i.e. it IS
- * our daemon), not merely that *something* is on that port. If the daemon isn't
- * responding, the discovery file is treated as stale and **no signal is sent**,
- * so a recycled PID now owned by an unrelated process is never killed.
+ * Crucially, it **only signals a PID it has confirmed is our daemon**. It calls
+ * `/health` (behind the daemon's bearer-token check, so a `200` proves the
+ * listener holds our token) AND verifies the PID that endpoint reports equals the
+ * one in discovery — so a stale discovery whose PID was recycled by an unrelated
+ * process is never signalled, even in the contrived case where something else
+ * answered on the same endpoint. If the daemon isn't responding (or reports a
+ * different PID), the discovery is treated as stale and **no signal is sent**.
  */
 export async function stopDaemonCommand(
   discoveryPath: string,
@@ -315,11 +342,20 @@ export async function stopDaemonCommand(
     return { stopped: false, reason: 'daemon discovery has no pid; cannot signal it' }
   }
   const pid = discovery.pid
-  if (!(await waitForReady(discovery, { attempts: 1, intervalMs: 0 }))) {
+  const stale = 'Run `daemon start` to recheck and replace it.'
+  const health = await fetchHealth(discovery)
+  if (!health) {
     return {
       stopped: false,
       pid,
-      reason: `daemon at ${discovery.endpoint} is not responding — the discovery file is likely stale. Not signalling pid ${pid} (it may have been reused by an unrelated process). Run \`daemon start\` to recheck and replace it.`,
+      reason: `daemon at ${discovery.endpoint} is not responding — the discovery file is likely stale. Not signalling pid ${pid} (it may have been reused by an unrelated process). ${stale}`,
+    }
+  }
+  if (typeof health.pid === 'number' && health.pid !== pid) {
+    return {
+      stopped: false,
+      pid,
+      reason: `the daemon answering ${discovery.endpoint} reports pid ${health.pid}, not ${pid} — discovery is stale. ${stale}`,
     }
   }
   try {

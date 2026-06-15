@@ -38,7 +38,12 @@ function waitForShutdown(): Promise<void> {
 async function serveDaemon(): Promise<void> {
   await runDaemonForeground({
     start: async (): Promise<ForegroundDaemon> => {
-      const daemon = await startDaemon({ adapters: daemonRegistry() })
+      // Thread the same config-path override the user's commands use, so an
+      // auto-started daemon reads the config they actually wrote (D21).
+      const daemon = await startDaemon({
+        adapters: daemonRegistry(),
+        configPath: resolveConfigFile(),
+      })
       return { endpoint: daemon.endpoint, stop: () => daemon.stop() }
     },
     onStarted: (endpoint) =>

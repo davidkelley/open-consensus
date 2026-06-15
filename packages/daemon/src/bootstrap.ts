@@ -38,6 +38,12 @@ export interface StartDaemonOptions {
   paths?: AppPaths
   /** Override the loaded config (tests). */
   config?: Config
+  /**
+   * Path to load the config from when `config` isn't supplied. Lets the CLI/TUI
+   * thread an `OPEN_CONSENSUS_CONFIG` override so an auto-started daemon reads the
+   * SAME config file the user's `agent`/`panel`/`init` commands wrote (Stage 8).
+   */
+  configPath?: string
   /** Force the loopback fallback instead of a unix socket. */
   loopback?: boolean
   /** Override the generated bearer token (tests). */
@@ -100,7 +106,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
   let server: DaemonServer | undefined
   let reaper: ReturnType<typeof setInterval> | undefined
   try {
-    const config = opts.config ?? loadConfig()
+    const config = opts.config ?? loadConfig(opts.configPath)
     store = new EngineStore({
       dbPath: join(paths.state, DB_NAME),
       rawDir: join(paths.data, RAW_DIRNAME),

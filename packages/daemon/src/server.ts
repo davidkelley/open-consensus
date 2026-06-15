@@ -222,7 +222,11 @@ export class DaemonServer {
       return sendError(res, 400, 'malformed path') // invalid percent-encoding
     }
 
-    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { ok: true })
+    // Report this process's PID so `daemon stop` can confirm the discovered PID
+    // still belongs to the live (token-authenticated) daemon before signalling it.
+    if (method === 'GET' && url.pathname === '/health') {
+      return sendJson(res, 200, { ok: true, pid: process.pid })
+    }
     if (method === 'GET' && url.pathname === '/panels') {
       return sendJson(res, 200, { panels: this.core.listPanels() })
     }

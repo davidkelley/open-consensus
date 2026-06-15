@@ -133,10 +133,10 @@ describe('DaemonServer over loopback', () => {
   })
   afterEach(() => h.cleanup())
 
-  it('serves a health check', async () => {
+  it('serves a health check (with the daemon pid for stop identity checks)', async () => {
     const res = await daemonRequest(endpoint, TOKEN, { method: 'GET', path: '/health' })
     expect(res.status).toBe(200)
-    expect(json(res)).toEqual({ ok: true })
+    expect(json(res)).toMatchObject({ ok: true, pid: process.pid })
   })
 
   it('rejects a missing or wrong token with 401', async () => {
