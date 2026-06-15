@@ -126,33 +126,36 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<RunningDaem
       server: boundServer,
       async stop() {
         clearInterval(boundReaper)
-        // Stop accepting requests FIRST so no new round slips in during the drain
-        // and then keeps running after the store is closed.
-        await boundServer.close()
-        await core.drain()
-        boundStore.close()
-        rmSync(discoveryPath, { force: true })
-        // Remove the unix socket file (a no-op for a loopback endpoint) so a
-        // stale node never lingers on disk after a clean shutdown.
-        if (!endpoint.startsWith('http://')) rmSync(endpoint, { force: true })
-        releaseLock(lockPath, lockInfo)
+        try {
+          // Stop accepting requests FIRST so no new round slips in during the
+          // drain and then keeps running after the store is closed.
+          await boundServer.close()
+          await core.drain()
+          boundStore.close()
+          rmSync(discoveryPath, { force: true })
+          // Remove the unix socket file (a no-op for a loopback endpoint) so a
+          // stale node never lingers on disk after a clean shutdown.
+          if (!endpoint.startsWith('http://')) rmSync(endpoint, { force: true })
+        } finally {
+          // Always release the lock, even if a cleanup step threw, so a restart
+          // is never blocked by a strand.
+          releaseLock(lockPath, lockInfo)
+        }
       },
     }
   } catch (err) {
-    // Roll back partial startup so the lock never strands a half-initialized daemon.
+    // Roll back partial startup so the lock never strands a half-initialized
+    // daemon — and never let a cleanup failure mask the original startup error.
     if (reaper) clearInterval(reaper)
     try {
       if (server) await server.close()
-    } catch {
-      /* best-effort: never let cleanup mask the original startup error */
-    }
-    try {
       store?.close()
+      rmSync(discoveryPath, { force: true })
     } catch {
-      /* ditto — a close failure must not suppress the real error */
+      /* best-effort */
+    } finally {
+      releaseLock(lockPath, lockInfo)
     }
-    rmSync(discoveryPath, { force: true })
-    releaseLock(lockPath, lockInfo)
     throw err
   }
 }

@@ -3,8 +3,10 @@ import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:
 
 /**
  * Daemon lifecycle primitives (plan D2/D14): an atomic single-instance lock and
- * an endpoint discovery file. Kept dependency-free — a `wx` (O_CREAT|O_EXCL)
- * open is atomic, and staleness is decided by PID liveness + start time.
+ * an endpoint discovery file. Kept dependency-free — acquisition is a temp-file
+ * write + atomic `link()` (so a racer never sees a partial file), and a stale
+ * lock (dead PID) is reclaimed by an atomic `rename()` claim so two racers can
+ * never both reclaim it. Staleness is decided by PID liveness.
  */
 
 export interface LockInfo {
@@ -53,11 +55,35 @@ export function acquireLock(lockPath: string, info: LockInfo, reclaimed = false)
     return true
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-    const existing = readLock(lockPath)
-    if (existing && isAlive(existing.pid)) return false
     if (reclaimed) return false // already tried once; avoid a reclaim loop
-    rmSync(lockPath, { force: true })
-    return acquireLock(lockPath, info, true)
+    const existing = readLock(lockPath)
+    if (existing && isAlive(existing.pid)) return false // a clearly-live owner
+    // Stale (or corrupt) lock. Reclaim it ATOMICALLY: rename it aside. Only one
+    // racer can rename a given path — the rest get ENOENT and restart — so two
+    // daemons can never both reclaim and both `link` (a plain rmSync+link would
+    // let a second reclaimer delete the first's freshly-acquired lock: D14).
+    const claim = `${lockPath}.reclaim-${randomBytes(6).toString('hex')}`
+    try {
+      renameSync(lockPath, claim)
+    } catch {
+      return acquireLock(lockPath, info, false) // lost the claim race; start over
+    }
+    try {
+      // Re-check what we actually moved: if a fresh LIVE lock slipped in between
+      // the read and the rename, restore it rather than steal it.
+      const moved = readLock(claim)
+      if (moved && isAlive(moved.pid)) {
+        try {
+          linkSync(claim, lockPath)
+        } catch {
+          /* a newer lock already exists — leave it */
+        }
+        return false
+      }
+      return acquireLock(lockPath, info, true) // lockPath is free; we hold `claim`
+    } finally {
+      rmSync(claim, { force: true })
+    }
   } finally {
     rmSync(tmp, { force: true })
   }

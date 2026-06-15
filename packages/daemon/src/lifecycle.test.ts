@@ -36,10 +36,14 @@ describe('lifecycle lock', () => {
     expect(acquireLock(lockPath, { pid: process.pid, startTime: 2 })).toBe(false)
   })
 
-  it('reclaims a lock whose owner is dead', () => {
+  it('reclaims a lock whose owner is dead, atomically and without leftovers', () => {
     writeFileSync(lockPath, JSON.stringify({ pid: DEAD_PID, startTime: 1 }))
     expect(acquireLock(lockPath, me)).toBe(true)
     expect(JSON.parse(readFileSync(lockPath, 'utf8')).pid).toBe(process.pid)
+    // The temp + rename-claim reclaim must leave no `.acquire-*` / `.reclaim-*`.
+    expect(
+      readdirSync(dir).filter((f) => f.includes('.acquire-') || f.includes('.reclaim-')),
+    ).toEqual([])
   })
 
   it('reclaims a corrupt lock file', () => {
