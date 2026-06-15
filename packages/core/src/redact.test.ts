@@ -5,9 +5,12 @@ describe('redactString', () => {
   it('masks value-shaped secrets', () => {
     expect(redactString('key sk-ant-abcdefgh0123456789 end')).toBe(`key ${REDACTED} end`)
     expect(redactString('OPENAI sk-abcdefghijklmnop0123')).toContain(REDACTED)
-    expect(redactString('token ghp_abcdefghijklmnop0123')).toContain(REDACTED)
+    expect(redactString('stripe sk_live_abcdefghijklmnop')).toContain(REDACTED)
+    expect(redactString('finegrained github_pat_abcdefghijklmnopqrst')).toContain(REDACTED)
+    expect(redactString('classic ghp_abcdefghijklmnop0123')).toContain(REDACTED)
     expect(redactString('aws AKIAIOSFODNN7EXAMPLE here')).toContain(REDACTED)
-    expect(redactString('slack xoxb-12345678-abcd here')).toContain(REDACTED)
+    expect(redactString('google AIzaSyABCDEFGHIJKLMNOPQRSTUV here')).toContain(REDACTED)
+    expect(redactString('slack xoxe-12345678-abcd here')).toContain(REDACTED)
     expect(redactString('Authorization: Bearer abcdef0123456789xyz')).toContain(REDACTED)
     expect(redactString('jwt eyJabcdefgh.eyJabcdefgh.signature01')).toContain(REDACTED)
   })
@@ -18,14 +21,31 @@ describe('redactString', () => {
 })
 
 describe('isSecretKey', () => {
-  it('flags secret-looking key names (case-insensitive)', () => {
-    for (const k of ['API_KEY', 'apiKey', 'AUTH_TOKEN', 'password', 'AWS_SECRET_ACCESS_KEY']) {
+  it('flags secret-looking key names (token-aware, case-insensitive)', () => {
+    for (const k of [
+      'API_KEY',
+      'apiKey',
+      'AUTH_TOKEN',
+      'password',
+      'AWS_SECRET_ACCESS_KEY',
+      'sessionId',
+      'authorization',
+    ]) {
       expect(isSecretKey(k)).toBe(true)
     }
   })
 
-  it('does not flag ordinary key names', () => {
-    for (const k of ['HOME', 'PATH', 'model', 'timeoutMs']) {
+  it('does not flag look-alike non-secret names', () => {
+    for (const k of [
+      'HOME',
+      'PATH',
+      'model',
+      'timeoutMs',
+      'author',
+      'authenticated',
+      'authorship',
+      'tokenizer',
+    ]) {
       expect(isSecretKey(k)).toBe(false)
     }
   })
@@ -47,25 +67,34 @@ describe('redactEnv', () => {
 })
 
 describe('redactDeep', () => {
-  it('walks objects and arrays, masking secret-keyed strings and value-shaped secrets', () => {
-    const input = {
-      token: 'whatever-string',
-      nested: { note: 'sk-ant-abcdefgh0123456789', count: 3 },
-      list: ['plain', 'ghp_abcdefghijklmnop0123'],
-      enabled: true,
-      empty: null,
-    }
-    expect(redactDeep(input)).toEqual({
-      token: REDACTED,
-      nested: { note: REDACTED, count: 3 },
+  it('walks objects/arrays, masking value-shaped secrets outside secret subtrees', () => {
+    expect(
+      redactDeep({
+        note: 'sk-ant-abcdefgh0123456789',
+        list: ['plain', 'ghp_abcdefghijklmnop0123'],
+        enabled: true,
+        empty: null,
+      }),
+    ).toEqual({
+      note: REDACTED,
       list: ['plain', REDACTED],
       enabled: true,
       empty: null,
     })
   })
 
-  it('recurses (not masks) a non-string value under a secret-looking key', () => {
-    expect(redactDeep({ secret: { inner: 'plain' } })).toEqual({ secret: { inner: 'plain' } })
+  it('taints the entire subtree under a secret-looking key (nested + arrays)', () => {
+    expect(
+      redactDeep({
+        credentials: { value: 'plain-not-a-pattern', nested: { again: 'still-plain' } },
+        tokens: ['plain-one', 'plain-two'],
+        count: 3,
+      }),
+    ).toEqual({
+      credentials: { value: REDACTED, nested: { again: REDACTED } },
+      tokens: [REDACTED, REDACTED],
+      count: 3,
+    })
   })
 
   it('passes scalars through unchanged', () => {

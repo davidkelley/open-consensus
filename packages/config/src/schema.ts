@@ -6,6 +6,7 @@ export const CONFIG_SCHEMA_VERSION = 1
 /** Lowercase kebab-case identifier used for agents and panels. */
 export const idSchema = z
   .string()
+  .max(64, 'id must be at most 64 characters')
   .regex(/^[a-z0-9][a-z0-9-]*$/, 'id must be lowercase kebab-case (a-z, 0-9, hyphen)')
 
 export const sessionModeSchema = z.enum(['stateless', 'resume'])
@@ -15,9 +16,9 @@ export type SessionMode = z.infer<typeof sessionModeSchema>
 export const agentSchema = z
   .object({
     id: idSchema,
-    name: z.string().min(1, 'name is required'),
-    adapter: z.string().min(1, 'adapter is required'),
-    model: z.string().min(1).optional(),
+    name: z.string().min(1, 'name is required').max(200),
+    adapter: z.string().min(1, 'adapter is required').max(64),
+    model: z.string().min(1).max(200).optional(),
     args: z.array(z.string()).default([]),
     env: z.record(z.string()).default({}),
     timeoutMs: z.number().int().positive().default(120_000),
@@ -39,7 +40,7 @@ export const roundDefaultsSchema = z
 export const panelSchema = z
   .object({
     id: idSchema,
-    name: z.string().min(1, 'name is required'),
+    name: z.string().min(1, 'name is required').max(200),
     agentIds: z.array(idSchema).min(1, 'a panel needs at least one agent'),
     quorum: z.number().int().positive(),
     concurrency: z.number().int().positive().optional(),

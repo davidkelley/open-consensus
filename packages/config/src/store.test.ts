@@ -112,6 +112,13 @@ describe('agent CRUD', () => {
     const c = cfg([agent('a')], [panel('solo', ['a'])])
     expect(() => removeAgent(c, 'a', { force: true })).toThrow(/would leave panel\(s\) empty/)
   })
+
+  it('clamps quorum so a force-remove from a quorum===size panel succeeds', () => {
+    // panel quorum defaults to size (2); force-removing one agent must clamp it.
+    const c = cfg([agent('a'), agent('b')], [panel('p', ['a', 'b'])])
+    const forced = removeAgent(c, 'a', { force: true })
+    expect(forced.panels[0]).toMatchObject({ agentIds: ['b'], quorum: 1 })
+  })
 })
 
 describe('panel CRUD', () => {

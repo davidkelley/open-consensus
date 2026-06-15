@@ -107,7 +107,8 @@ export function buildProgram(deps: CliDeps): Command {
 export function resolveConfigFile(
   env: PathEnv & { OPEN_CONSENSUS_CONFIG?: string } = process.env,
 ): string {
-  return env.OPEN_CONSENSUS_CONFIG ?? configPath(env)
+  const override = env.OPEN_CONSENSUS_CONFIG
+  return override && override.length > 0 ? override : configPath(env)
 }
 
 /** Parse argv and run. Throws on usage/validation errors (caller decides exit). */

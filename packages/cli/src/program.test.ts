@@ -95,4 +95,10 @@ describe('resolveConfigFile', () => {
       '/home/x/.config/open-consensus/config.json',
     )
   })
+
+  it('treats an empty OPEN_CONSENSUS_CONFIG as unset', () => {
+    expect(resolveConfigFile({ HOME: '/home/x', OPEN_CONSENSUS_CONFIG: '' })).toBe(
+      '/home/x/.config/open-consensus/config.json',
+    )
+  })
 })

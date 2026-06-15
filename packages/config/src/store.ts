@@ -1,9 +1,16 @@
 import { randomBytes } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { type PathEnv, configDir } from '@open-consensus/core'
 import { migrate } from './migrations'
-import { type Agent, type Config, type Panel, configSchema, formatZodError } from './schema'
+import {
+  type Agent,
+  CONFIG_SCHEMA_VERSION,
+  type Config,
+  type Panel,
+  configSchema,
+  formatZodError,
+} from './schema'
 
 /** Config file failed to parse as JSON (truncated/corrupt) — never overwrite it. */
 export class ConfigCorruptError extends Error {
@@ -28,7 +35,7 @@ export function configPath(env?: PathEnv): string {
 
 /** An empty, valid config at the current schema version. */
 export function defaultConfig(): Config {
-  return configSchema.parse({ schemaVersion: 1 })
+  return configSchema.parse({ schemaVersion: CONFIG_SCHEMA_VERSION })
 }
 
 /** Parse + migrate + validate, surfacing actionable errors. Throws on invalid. */
@@ -64,16 +71,27 @@ export function loadConfig(path = configPath()): Config {
 }
 
 /**
- * Persist the config atomically (temp file + rename) with `0600` perms (it can
- * hold env secrets). Re-validates first, so an integrity violation never reaches
- * disk.
+ * Persist the config atomically (temp file in the same dir + rename) with `0600`
+ * perms (it can hold env secrets). Re-validates first, so an integrity violation
+ * never reaches disk; on a write failure the temp file is removed (no orphans).
+ *
+ * Contract: callers must **load-then-save** (`loadConfig` refuses a corrupt
+ * file), so a corrupt target is never overwritten by a normal mutation flow.
+ * Writes are not yet inter-process locked — concurrent CLI invocations are
+ * last-writer-wins; the single-instance daemon (D14) will own serialized writes
+ * in a later stage.
  */
 export function saveConfig(config: Config, path = configPath()): void {
   const validated = configSchema.parse(config)
   mkdirSync(dirname(path), { recursive: true })
   const tmp = `${path}.tmp-${randomBytes(6).toString('hex')}`
-  writeFileSync(tmp, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 })
-  renameSync(tmp, path)
+  try {
+    writeFileSync(tmp, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 })
+    renameSync(tmp, path)
+  } catch (err) {
+    rmSync(tmp, { force: true })
+    throw err
+  }
 }
 
 /** Re-validate a mutated config, rethrowing schema failures as integrity errors. */
@@ -124,7 +142,12 @@ export function removeAgent(config: Config, id: string, opts: { force?: boolean 
       `agent '${id}' is used by panel(s): ${usedBy.map((p) => p.id).join(', ')}; pass force to also remove it from them`,
     )
   }
-  const panels = config.panels.map((p) => ({ ...p, agentIds: p.agentIds.filter((a) => a !== id) }))
+  const panels = config.panels.map((p) => {
+    const agentIds = p.agentIds.filter((a) => a !== id)
+    // Clamp quorum so force-removing from a quorum===size panel actually works
+    // instead of being blocked by the quorum>size integrity check.
+    return { ...p, agentIds, quorum: Math.min(p.quorum, agentIds.length) }
+  })
   const emptied = panels.filter((p) => p.agentIds.length === 0)
   if (emptied.length > 0) {
     throw new ConfigIntegrityError(

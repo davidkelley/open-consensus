@@ -45,8 +45,14 @@ describe('migrate', () => {
     expect(() => migrate({ schemaVersion: 99 })).toThrow(/newer than this build supports/)
   })
 
-  it('returns an unversioned value as-is (schema then surfaces the error)', () => {
-    const raw = { agents: [] }
-    expect(migrate(raw)).toBe(raw)
+  it('stamps an unversioned object as v1 (so hand-written configs are accepted)', () => {
+    expect(migrate({ agents: [] })).toEqual({ agents: [], schemaVersion: 1 })
+  })
+
+  it('passes non-object unversioned values through (schema then surfaces the error)', () => {
+    expect(migrate('nope')).toBe('nope')
+    expect(migrate(null)).toBe(null)
+    const arr: unknown[] = []
+    expect(migrate(arr)).toBe(arr)
   })
 })

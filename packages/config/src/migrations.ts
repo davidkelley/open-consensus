@@ -56,6 +56,20 @@ export function migrate(raw: unknown): unknown {
       `config schemaVersion ${version} is newer than this build supports (${CONFIG_SCHEMA_VERSION}); upgrade open-consensus`,
     )
   }
-  if (version < 1) return raw
+  if (version < 1) {
+    // Unversioned: stamp as v1 so a hand-written config (which naturally omits
+    // schemaVersion) is accepted and then validated by the strict schema — a
+    // genuinely malformed object still fails validation with a clear message.
+    // Non-object values pass through so the schema surfaces a type error.
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+      return runMigrations(
+        { ...(raw as Record<string, unknown>), schemaVersion: 1 },
+        1,
+        CONFIG_SCHEMA_VERSION,
+        MIGRATIONS,
+      )
+    }
+    return raw
+  }
   return runMigrations(raw as Record<string, unknown>, version, CONFIG_SCHEMA_VERSION, MIGRATIONS)
 }

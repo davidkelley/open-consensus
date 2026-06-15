@@ -3,7 +3,10 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "customConditions": ["development"],
+    "baseUrl": ".",
+    "paths": {
+      "@open-consensus/*": ["packages/*/src/index.ts"]
+    },
     "lib": ["ES2023"],
     "types": ["node"],
     "strict": true,
