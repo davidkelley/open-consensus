@@ -106,10 +106,13 @@ describe('startEventStream', () => {
     expect(h.events).toEqual([{ event: { type: 'run-created', runId: 'r', panelId: 'p' }, seq: 7 }])
   })
 
-  it('drops malformed frames without emitting', () => {
+  it('drops malformed frames (non-JSON, no type, and right-type-wrong-shape)', () => {
     const h = harness(DISCOVERY)
     h.handlers?.onChunk('id: 1\ndata: not json\n\n')
     h.handlers?.onChunk('id: 2\ndata: {"no":"type"}\n\n')
+    // Correct discriminant but missing required fields (would crash the reducer).
+    h.handlers?.onChunk('id: 3\ndata: {"type":"round-started","runId":"r"}\n\n')
+    h.handlers?.onChunk('id: 4\ndata: {"type":"made-up","runId":"r"}\n\n')
     expect(h.events).toEqual([])
   })
 

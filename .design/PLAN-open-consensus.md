@@ -288,3 +288,12 @@ The final whole-build review (Codex backgrounded; opencode + Gemini substantive)
 - **D19 SSE event coalescing/throttling (Gemini low).** The per-event reducer is pure + cheap and ink batches renders; explicit throttling is a deferred perf optimization, not a correctness issue.
 
 The **Grok CLI was unavailable for the entire build** (`403 spending-limit`); every stage's review loop ran with Codex + opencode + Gemini, noted in each stage's commits.
+
+### Phase 3 round 2 (D17 completed; remaining dispositions)
+
+The final review's round 2 verified the D17 write-validation and found it incomplete; completed:
+- **D17 — also validate UPDATE paths and bounded READS.** `setRunState`/`completeRound` now validate `state`/`verdict` on write; `getRun`/`getRound`/`listRuns` validate the assembled record on read, so a hand-edited or migration-corrupted row is caught (the "validated on read so a hand-edit can't silently corrupt state" half of D17) rather than propagated. A store test corrupts a row out-of-band and asserts `getRun` rejects it.
+- **D17/D11 — SSE events are a zod discriminated union.** `engineEventSchema` (single source of truth for `EngineEvent`) is validated in the TUI's SSE decoder, so a frame with the right `type` but a missing/typed-wrong field (e.g. `round-started` without `agentIds`) is DROPPED rather than crashing the timeline reducer.
+- Removed the vestigial `RECORD_SCHEMA_VERSION` export (DDL `user_version` is the single migration version); documented `panel.roundDefaults` as **reserved/schema-ready, not applied in v1** (like `sessionMode: 'resume'`).
+
+Still deferred (refined): **D7 per-run config snapshot** — Codex rightly notes the *cross-restart* case (edit config.json + restart, then add a round to an existing run → the new round uses the new config with no audit trail). Acknowledged as a real D7 auditability limitation, but it is **not a correctness/security defect** (each round executes correctly against the then-current config; Gemini concurred with the deferral). A per-round resolved-config snapshot is a bounded post-v1 enhancement. The disk-ceiling (plan-optional) and orphan-sweep-PID-identity (documented Stage-5 tradeoff) deferrals stand.

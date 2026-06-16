@@ -29,6 +29,12 @@ export const agentSchema = z
 export type Agent = z.infer<typeof agentSchema>
 export type AgentInput = z.input<typeof agentSchema>
 
+/**
+ * Per-panel round defaults. **Reserved / schema-ready, not applied in v1** — like
+ * `sessionMode: 'resume'`, the field is carried so a panel-level timeout/retry
+ * override can be honored later without a migration. v1 dispatch uses the
+ * per-agent `timeoutMs`/`maxRetries` directly (see the daemon resolver).
+ */
 export const roundDefaultsSchema = z
   .object({
     timeoutMs: z.number().int().positive().optional(),

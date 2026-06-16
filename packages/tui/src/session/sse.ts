@@ -1,6 +1,6 @@
 import { request } from 'node:http'
 import type { Discovery } from '@open-consensus/daemon'
-import type { EngineEvent } from '@open-consensus/engine'
+import { type EngineEvent, engineEventSchema } from '@open-consensus/engine'
 
 /**
  * Daemon SSE subscription for the TUI (plan D11/D19). The daemon streams
@@ -159,12 +159,13 @@ export function startEventStream(deps: EventStreamDeps): EventStream {
 
 function decodeEvent(data: string): EngineEvent | undefined {
   try {
-    const parsed = JSON.parse(data)
-    if (parsed && typeof parsed === 'object' && typeof parsed.type === 'string') {
-      return parsed as EngineEvent
-    }
+    // Validate against the shared engine-event schema: a frame with the right
+    // `type` but missing/typed-wrong fields (e.g. round-started without agentIds)
+    // is DROPPED here rather than crashing the timeline reducer downstream.
+    const result = engineEventSchema.safeParse(JSON.parse(data))
+    if (result.success) return result.data
   } catch {
-    /* malformed frame — drop it rather than crash the stream */
+    /* non-JSON frame — drop it rather than crash the stream */
   }
   return undefined
 }

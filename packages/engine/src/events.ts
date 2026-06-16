@@ -1,27 +1,49 @@
-import type { InvocationStatus, QuorumVerdict } from './model'
+import { z } from 'zod'
+import { invocationStatusSchema, quorumVerdictSchema } from './model'
 
 /**
- * Typed engine events (plan D11). Every state transition is emitted with the
- * **durable** sequence number from the persisted event log (the store's
- * autoincrement rowid), so the sequence is monotonic and stable across daemon
- * restarts — the daemon uses it for both the long-poll snapshot version and the
- * SSE `Last-Event-ID`.
+ * Typed engine events (plan D11/D17). Defined as a zod discriminated union (the
+ * inferred TS type is the single source of truth) so a consumer reading them off
+ * the wire — the SSE stream — can validate the payload and DROP a malformed frame
+ * rather than feed missing fields into a reducer. Every transition carries the
+ * **durable** sequence number from the persisted event log, monotonic + stable
+ * across daemon restarts (the daemon uses it for the long-poll `stateVersion` and
+ * the SSE `Last-Event-ID`).
  */
-export type EngineEvent =
-  | { type: 'run-created'; runId: string; panelId: string }
-  | { type: 'round-started'; runId: string; roundId: string; index: number; agentIds: string[] }
-  | { type: 'invocation-started'; runId: string; roundId: string; agentId: string; attempt: number }
-  | {
-      type: 'invocation-finished'
-      runId: string
-      roundId: string
-      agentId: string
-      status: InvocationStatus
-      attempts: number
-    }
-  | { type: 'round-completed'; runId: string; roundId: string; verdict: QuorumVerdict }
-  | { type: 'run-abandoned'; runId: string }
-  | { type: 'run-readopted'; runId: string }
+export const engineEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('run-created'), runId: z.string(), panelId: z.string() }),
+  z.object({
+    type: z.literal('round-started'),
+    runId: z.string(),
+    roundId: z.string(),
+    index: z.number().int().min(0),
+    agentIds: z.array(z.string()),
+  }),
+  z.object({
+    type: z.literal('invocation-started'),
+    runId: z.string(),
+    roundId: z.string(),
+    agentId: z.string(),
+    attempt: z.number().int().min(0),
+  }),
+  z.object({
+    type: z.literal('invocation-finished'),
+    runId: z.string(),
+    roundId: z.string(),
+    agentId: z.string(),
+    status: invocationStatusSchema,
+    attempts: z.number().int().min(0),
+  }),
+  z.object({
+    type: z.literal('round-completed'),
+    runId: z.string(),
+    roundId: z.string(),
+    verdict: quorumVerdictSchema,
+  }),
+  z.object({ type: z.literal('run-abandoned'), runId: z.string() }),
+  z.object({ type: z.literal('run-readopted'), runId: z.string() }),
+])
+export type EngineEvent = z.infer<typeof engineEventSchema>
 
 export type EngineEventListener = (event: EngineEvent, seq: number) => void
 

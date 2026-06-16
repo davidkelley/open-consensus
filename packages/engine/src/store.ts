@@ -9,12 +9,19 @@ import {
   type RunState,
   computeVerdict,
   invocationRecordSchema,
+  quorumVerdictSchema,
   roundRecordSchema,
   runRecordSchema,
+  runStateSchema,
 } from './model'
 
-/** Validate a record ON WRITE (D17) so a bug can never persist a malformed row;
- * reads stay light. The schema is `passthrough`, so additive fields are kept. */
+/**
+ * Validate records at the persistence boundary (D17). Inserts/updates validate
+ * the record being written, so a bug can never persist a malformed row. Bounded
+ * single-record READS (getRun/getRound) also validate, so a hand-edited or
+ * migration-corrupted DB row is caught rather than silently propagated — large
+ * result sets / raw blobs stay light per D17.
+ */
 const roundWriteSchema = roundRecordSchema.omit({ invocations: true, verdict: true })
 
 const SCHEMA_VERSION = 3
@@ -155,6 +162,7 @@ export class EngineStore {
   }
 
   setRunState(runId: string, state: RunState): void {
+    runStateSchema.parse(state) // validate on write (D17)
     this.db.prepare('UPDATE runs SET state = ? WHERE runId = ?').run(state, runId)
   }
 
@@ -217,6 +225,7 @@ export class EngineStore {
   }
 
   completeRound(roundId: string, verdict: QuorumVerdict): void {
+    quorumVerdictSchema.parse(verdict) // validate on write (D17)
     this.db
       .prepare("UPDATE rounds SET state = 'complete', verdict = ? WHERE roundId = ?")
       .run(verdict, roundId)
@@ -352,10 +361,10 @@ export class EngineStore {
   // -- reads --------------------------------------------------------------
 
   getRun(runId: string): RunRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM runs WHERE runId = ?').get(runId) as
-      | (RunRecord & { state: string })
-      | undefined
-    return row ? { ...row, state: row.state as RunState } : undefined
+    const row = this.db.prepare('SELECT * FROM runs WHERE runId = ?').get(runId)
+    // Validate on read (D17): a hand-edited/corrupt row (e.g. an invalid `state`)
+    // is caught here rather than silently propagated into the daemon/TUI.
+    return row ? runRecordSchema.parse(row) : undefined
   }
 
   /**
@@ -395,11 +404,9 @@ export class EngineStore {
 
   listRuns(state?: RunState): RunRecord[] {
     const rows = state
-      ? (this.db
-          .prepare('SELECT * FROM runs WHERE state = ? ORDER BY createdAt')
-          .all(state) as RunRecord[])
-      : (this.db.prepare('SELECT * FROM runs ORDER BY createdAt').all() as RunRecord[])
-    return rows
+      ? this.db.prepare('SELECT * FROM runs WHERE state = ? ORDER BY createdAt').all(state)
+      : this.db.prepare('SELECT * FROM runs ORDER BY createdAt').all()
+    return rows.map((row) => runRecordSchema.parse(row)) // validate on read (D17)
   }
 
   getRound(roundId: string): RoundRecord | undefined {
@@ -410,17 +417,19 @@ export class EngineStore {
     const invRows = this.db
       .prepare('SELECT * FROM invocations WHERE roundId = ? ORDER BY agentId')
       .all(roundId) as InvocationRow[]
-    return {
+    // Validate the assembled record on read (D17) — a corrupt status/verdict/state
+    // is caught here, not propagated downstream.
+    return roundRecordSchema.parse({
       roundId: row.roundId,
       runId: row.runId,
       index: row.idx,
       prompt: row.prompt,
       quorum: row.quorum,
-      state: row.state as RoundRecord['state'],
-      ...(row.verdict ? { verdict: row.verdict as QuorumVerdict } : {}),
+      state: row.state,
+      ...(row.verdict ? { verdict: row.verdict } : {}),
       invocations: invRows.map((r) => ({
         agentId: r.agentId,
-        status: r.status as InvocationRecord['status'],
+        status: r.status,
         attempts: r.attempts,
         distilled: r.distilled,
         ...(r.errorClass ? { errorClass: r.errorClass } : {}),
@@ -428,7 +437,7 @@ export class EngineStore {
         truncated: r.truncated === 1,
         ...(r.rawRef ? { rawRef: r.rawRef } : {}),
       })),
-    }
+    })
   }
 
   /** The most recent round of a run (highest index) — used by `status` (D12). */

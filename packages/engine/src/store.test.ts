@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { InvocationRecord, RunRecord } from './model'
 import { EngineStore } from './store'
@@ -46,6 +47,18 @@ describe('EngineStore', () => {
     expect(
       () => startRound(store, Number.NaN), // NaN quorum is rejected before insert
     ).toThrow()
+  })
+
+  it('catches a hand-edited/corrupt row on read (D17 read-validation)', () => {
+    const dbPath = join(dir, 'corrupt.sqlite')
+    const s = new EngineStore({ dbPath, rawDir: join(dir, 'rawc') })
+    s.createRun(run('rc'))
+    // Corrupt the persisted state OUT OF BAND (simulates a hand-edit / migration bug).
+    const raw = new Database(dbPath)
+    raw.prepare("UPDATE runs SET state = 'bogus' WHERE runId = 'rc'").run()
+    raw.close()
+    expect(() => s.getRun('rc')).toThrow() // not silently propagated
+    s.close()
   })
 
   it('persists a run/round/invocation and reads them back', () => {

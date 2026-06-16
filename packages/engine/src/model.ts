@@ -12,9 +12,6 @@
  */
 import { z } from 'zod'
 
-/** Bump + add an ordered migration when a persisted-record shape changes (D17). */
-export const RECORD_SCHEMA_VERSION = 1
-
 export const invocationStatusSchema = z.enum([
   'pending',
   'running',
