@@ -131,6 +131,10 @@ describe('slash registry', () => {
     expect(out.join('\n')).toMatch(/added agent 'a' \(claude\)/)
   })
 
+  it('agent add rejects a dangling --adapter with no value', async () => {
+    await expect(dispatch('agent add a --adapter')).rejects.toThrow(/missing adapter value/)
+  })
+
   it('agent test reports an unavailable adapter', async () => {
     await dispatch('agent add g --adapter gemini')
     out.length = 0

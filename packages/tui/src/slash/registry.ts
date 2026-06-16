@@ -78,6 +78,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       const id = requireArg(args, 1, 'agent id')
       if (sub === 'add') {
         const adapter = flag(args, '--adapter') ?? requireArg(args, 2, 'adapter')
+        if (adapter.startsWith('-'))
+          throw new Error('missing adapter value (e.g. --adapter claude)')
         const allow = args.includes('--allow-unsandboxed')
         const result = await addAgentCommand(
           ctx.configCtx,

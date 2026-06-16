@@ -52,5 +52,9 @@ export function useDaemonEvents(opts: UseDaemonEventsOptions): {
     return () => stream.close()
   }, [runId, discoveryPath, start])
 
-  return { timeline, status }
+  // Derive during render: the effect resyncs `timeline` to the new run AFTER this
+  // render, so gate on a matching runId to avoid flashing the previous run's
+  // (already-committed) timeline for one frame.
+  const visible = runId !== undefined && timeline?.runId === runId ? timeline : undefined
+  return { timeline: visible, status }
 }

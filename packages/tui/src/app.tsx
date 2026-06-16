@@ -108,7 +108,9 @@ export function App(props: AppProps): ReactElement {
 
   useInput((input, key) => {
     if (!(key.ctrl && input === 'c')) return
-    const runActive = runId !== undefined && timeline !== undefined && !isTerminal(timeline)
+    // Active the moment a run id is set — even before useDaemonEvents publishes
+    // the first timeline — so a quick Ctrl+C cancels the run instead of exiting.
+    const runActive = runId !== undefined && (timeline === undefined || !isTerminal(timeline))
     if (runActive && !cancelling.current) {
       // First Ctrl+C with an active run: request a server-side cancel (the daemon
       // tree-kills the child and drives the round to a terminal SSE event, which

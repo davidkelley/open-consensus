@@ -181,6 +181,32 @@ describe('startEventStream', () => {
     }
   })
 
+  it('does not treat a 200 non-SSE (application/json) response as an open stream', async () => {
+    let server: Server | undefined
+    try {
+      server = createServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"not":"sse"}')
+      })
+      await new Promise<void>((r) => server?.listen(0, '127.0.0.1', () => r()))
+      const addr = server.address()
+      const port = addr && typeof addr === 'object' ? addr.port : 0
+      const statuses: StreamStatus[] = []
+      const stream = startEventStream({
+        resolveDiscovery: () => ({ endpoint: `http://127.0.0.1:${port}`, token: 't' }),
+        onEvent: () => undefined,
+        onStatus: (s) => statuses.push(s),
+        backoffMs: () => 60_000,
+      })
+      await new Promise((r) => setTimeout(r, 60))
+      stream.close()
+      expect(statuses).not.toContain('open')
+      expect(statuses).toContain('reconnecting')
+    } finally {
+      server?.close()
+    }
+  })
+
   it('does not report "open" or reset backoff on a non-2xx response', async () => {
     let server: Server | undefined
     try {

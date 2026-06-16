@@ -186,6 +186,10 @@ function httpConnect(
   lastEventId: number,
   handlers: ConnectHandlers,
 ): RawConnection {
+  // v1 endpoints are a unix socket path or `http://127.0.0.1:port` (no TLS); the
+  // `https://` arm mirrors the daemon client's classifier (both treat http-family
+  // over plaintext node:http) so an `http`-prefixed value is never mistaken for a
+  // socket path. A real TLS endpoint is out of v1 scope.
   const isHttp =
     discovery.endpoint.startsWith('http://') || discovery.endpoint.startsWith('https://')
   const headers: Record<string, string> = {
@@ -209,11 +213,16 @@ function httpConnect(
   }
 
   const req = request(options, (res) => {
-    // A non-2xx (401/503) or non-SSE response is NOT an open stream — draining +
-    // reconnecting WITHOUT calling onOpen keeps backoff growing instead of
-    // hammering a stale-token / overloaded daemon.
+    // Attach close/error handlers FIRST so a reset mid-drain (below) can't surface
+    // as an unhandled 'error' on the response.
+    res.on('close', closeOnce)
+    res.on('error', closeOnce)
+    // A non-2xx (401/503) or non-SSE (e.g. 200 application/json) response is NOT
+    // an open stream — drain + reconnect WITHOUT calling onOpen, so backoff keeps
+    // growing instead of hammering a stale-token / overloaded / wrong responder.
     const status = res.statusCode ?? 0
-    if (status < 200 || status >= 300) {
+    const contentType = res.headers['content-type'] ?? ''
+    if (status < 200 || status >= 300 || !contentType.includes('text/event-stream')) {
       res.resume() // drain so the socket can be freed
       closeOnce()
       return
@@ -222,8 +231,6 @@ function httpConnect(
     res.setEncoding('utf8')
     res.on('data', (chunk: string) => handlers.onChunk(chunk))
     res.on('end', closeOnce)
-    res.on('close', closeOnce)
-    res.on('error', closeOnce)
   })
   req.on('error', closeOnce)
   req.end()
