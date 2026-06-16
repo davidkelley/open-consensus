@@ -4,7 +4,7 @@
    Orchestrator (Claude Code, Codex, …)
         │  MCP (stdio)
         ▼
-   open-consensus-mcp  ── thin client; auto-starts + forwards to the daemon
+   open-consensus-mcp  ── thin client; forwards to the daemon (CLI/TUI auto-start it)
         │  unix socket (0600) default / loopback HTTP + bearer token fallback
         ▼
    Daemon (long-lived, single-instance per user)

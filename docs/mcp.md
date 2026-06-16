@@ -57,9 +57,9 @@ daemon restart for the run's lifetime.
 
 ## Registering the server
 
-The daemon auto-starts on first use (a future CLI release wires `open-consensus
-daemon start`; until then start it explicitly). Register the stdio server with
-your host:
+The MCP server expects the daemon to be running and returns an actionable error
+otherwise — the CLI/TUI auto-start it (your first `open-consensus` command, e.g.
+`init`, brings it up and it persists). Register the stdio server with your host:
 
 **Claude Code** (`~/.claude.json` or project `.mcp.json`):
 

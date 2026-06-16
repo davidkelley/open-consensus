@@ -99,6 +99,8 @@ describe('consensus live-e2e (real agents)', () => {
         timeout: CALL_TIMEOUT_MS,
       })
       const text = (res.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('')
+      // Surface a daemon-side tool error as its message (mirrors the mock E2E).
+      if (res.isError === true) throw new Error(`${name} failed: ${text}`)
       return JSON.parse(text) as Record<string, unknown>
     }
 

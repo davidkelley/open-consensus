@@ -17,8 +17,11 @@ export default defineConfig({
   test: {
     include: ['test/e2e-live/**/*.test.ts'],
     passWithNoTests: true,
-    testTimeout: 120_000,
-    hookTimeout: 120_000,
+    // Generous: the live panel runs agents sequentially (concurrency 1), each up
+    // to ~90s, and the test re-polls to a 5-minute deadline — the per-test timeout
+    // must exceed that or vitest aborts the loop early.
+    testTimeout: 360_000,
+    hookTimeout: 360_000,
     // Live agents share machine resources; never fan all of them out at once.
     fileParallelism: false,
   },
