@@ -30,7 +30,8 @@ carries a `next_action` hint:
      retries/backoff happen there and are never replayed to you (only summarized
      as attempt counts).
 4. Decide: `consensus_round({ runId, prompt })` for another round (you compose the
-   next prompt — rounds are stateless), or finalize.
+   next prompt — rounds are stateless), or finalize by simply stopping (there is
+   no "finalize" tool — you just stop adding rounds).
 
 Other tools:
 

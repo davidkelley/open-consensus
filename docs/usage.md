@@ -31,8 +31,9 @@ Tell your orchestrator to *use Open Consensus*. The loop it runs:
 5. `consensus_get_raw({ rawRef, cursor?, maxBytes? })` to page the full output of
    an agent whose answer was truncated, without bloating context.
 6. `consensus_cancel({ runId })` (or `consensus_cancel_agent({ runId, roundId,
-   agentId })`) to abort an in-flight run/agent — the daemon tree-kills the child
-   so nothing keeps running server-side.
+   agentId })`, which in v1 cancels at **round** granularity — the whole round)
+   to abort in-flight work — the daemon tree-kills the children so nothing keeps
+   running server-side.
 
 Re-entry after an orchestrator restart: `consensus_list_runs({ state? })` surfaces
 in-flight + parked runs; `consensus_status({ runId })` re-adopts a parked run so

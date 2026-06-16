@@ -37,9 +37,11 @@ open-consensus                      # bare command launches the slash-command TU
 #   › /run review "Critique this plan: …"
 ```
 
-The daemon is auto-started on demand (a per-user singleton); you never run it
-by hand. Tell your orchestrator to "use Open Consensus" — see
-[docs/usage.md](docs/usage.md).
+The daemon is a per-user singleton that you never run by hand: the **CLI and TUI
+auto-start it on demand** and it persists across sessions. The MCP server expects
+it already running and returns an actionable error otherwise — in practice your
+first `open-consensus` command (e.g. `init`) starts it, after which it stays up.
+Tell your orchestrator to "use Open Consensus" — see [docs/usage.md](docs/usage.md).
 
 ## Documentation
 
@@ -78,6 +80,7 @@ npm run build         # turbo: build every package
 npm test              # turbo: vitest (mock-only, no real CLIs, ≥90% coverage gate)
 npm run test:e2e      # mock-stack E2E: MCP → daemon → engine → mock (no spend)
 npm run test:e2e:live # OPT-IN: real agent CLIs, REAL SPEND (final release gate)
+npm run smoke:pack    # install-from-pack: pack → install into a clean prefix → run the bin
 npm run lint          # Biome + the async-safety ESLint overlay
 npm run typecheck     # strict tsc across packages
 ```

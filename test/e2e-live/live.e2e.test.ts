@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { type Adapter, defaultRegistry } from '@open-consensus/adapters'
+import { REAL_ADAPTER_IDS, defaultRegistry } from '@open-consensus/adapters'
 import { type Config, parseConfig } from '@open-consensus/config'
 import type { AppPaths } from '@open-consensus/core'
 import { type AdapterRegistry, type RunningDaemon, startDaemon } from '@open-consensus/daemon'
@@ -31,15 +31,17 @@ const PROMPT = 'Reply with only the single word: ok'
 // 90s for a real agent, so requests must allow longer.
 const CALL_TIMEOUT_MS = 120_000
 
-/** Probe the SANDBOXED real adapters; return the ids that are installed + usable. */
+/**
+ * Allow-list (not deny-list) the agents we'll spend money on: a KNOWN real
+ * adapter id, WITH a native sandbox, that is installed + usable. So a registry
+ * change can never slip the mock or an unsandboxed tool into a live, paid run.
+ */
 async function availableAdapters(registry: AdapterRegistry): Promise<string[]> {
   const ids: string[] = []
-  for (const [id, adapter] of registry) {
-    if (id === 'mock') continue
-    // Never include an adapter without a native sandbox, even if a custom/default
-    // registry change started returning one (D20).
-    if ((adapter as Adapter).capabilities.sandbox === false) continue
-    if ((await (adapter as Adapter).detect()).available) ids.push(id)
+  for (const id of REAL_ADAPTER_IDS) {
+    const adapter = registry.get(id)
+    if (!adapter || adapter.capabilities.sandbox === false) continue // D20
+    if ((await adapter.detect()).available) ids.push(id)
   }
   return ids
 }
@@ -62,11 +64,12 @@ afterAll(async () => {
 })
 
 describe('consensus live-e2e (real agents)', () => {
-  it('runs a real multi-CLI consensus to a finalized verdict', async () => {
+  it('runs a real multi-CLI consensus to a finalized verdict', async (ctx) => {
     const registry = defaultRegistry()
     const ids = await availableAdapters(registry)
     if (ids.length === 0) {
-      console.warn('live-e2e: no real agent CLIs detected — skipping')
+      // A VISIBLE skip (not a silent green pass) so a broken detection in CI shows.
+      ctx.skip()
       return
     }
 
@@ -103,11 +106,17 @@ describe('consensus live-e2e (real agents)', () => {
       runId: string
       roundId: string
     }
-    const round = (await call('consensus_poll', {
-      runId: started.runId,
-      roundId: started.roundId,
-      wait_ms: 90_000,
-    })) as { done: boolean; verdict: string; agents: Array<{ status: string }> }
+    // With concurrency:1 the real agents run sequentially and a single (server-capped)
+    // long-poll can return before the round finishes — re-poll until done.
+    let round: { done: boolean; verdict: string; agents: Array<{ status: string }> }
+    const deadline = Date.now() + 5 * 60_000
+    do {
+      round = (await call('consensus_poll', {
+        runId: started.runId,
+        roundId: started.roundId,
+        wait_ms: 45_000,
+      })) as typeof round
+    } while (!round.done && Date.now() < deadline)
 
     expect(round.done).toBe(true)
     // At least one real agent answered ok; the verdict is met or degraded (never

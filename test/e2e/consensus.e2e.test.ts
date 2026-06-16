@@ -71,10 +71,12 @@ async function call<T = Record<string, unknown>>(
   client: Client,
   name: string,
   args: Record<string, unknown>,
-): Promise<{ parsed: T; isError: boolean }> {
+): Promise<{ parsed: T }> {
   const res = await client.callTool({ name, arguments: args })
   const text = (res.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('')
-  return { parsed: JSON.parse(text) as T, isError: res.isError === true }
+  // Surface a daemon-side tool error as its message, not an opaque JSON.parse throw.
+  if (res.isError === true) throw new Error(`${name} failed: ${text}`)
+  return { parsed: JSON.parse(text) as T }
 }
 
 beforeEach(async () => {

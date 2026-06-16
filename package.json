@@ -13,7 +13,7 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && tsc --noEmit -p tsconfig.test.json",
     "test": "turbo run test",
     "lint": "biome check . && eslint packages/*/src",
     "lint:fix": "biome check --write . && eslint packages/*/src --fix",

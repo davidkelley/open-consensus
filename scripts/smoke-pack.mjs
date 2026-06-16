@@ -14,6 +14,14 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 const run = (cmd, args, opts = {}) =>
   execFileSync(cmd, args, { encoding: 'utf8', stdio: 'pipe', ...opts })
 
+// The published bins require Node >= 22 (ink 7); installing + running under an
+// older Node would 'succeed' the install but fail at runtime, so guard up front.
+const major = Number(process.versions.node.split('.')[0])
+if (major < 22) {
+  console.error(`smoke:pack requires Node >= 22 (found ${process.versions.node})`)
+  process.exit(1)
+}
+
 const PUBLISHABLE = [
   { name: '@open-consensus/cli', dir: 'packages/cli', runnableBin: 'open-consensus' },
   { name: '@open-consensus/mcp', dir: 'packages/mcp' },
@@ -49,7 +57,9 @@ try {
   run('npm', ['install', '--no-audit', '--no-fund', ...tarballs], { cwd: consumer })
   const bin = join(consumer, 'node_modules', '.bin', 'open-consensus')
   const help = run(bin, ['--help'], { cwd: consumer })
-  if (!help.includes('open-consensus')) throw new Error('open-consensus --help produced no usage')
+  if (!help.includes('open-consensus')) {
+    throw new Error("open-consensus --help did not mention 'open-consensus'")
+  }
   console.log('ok   installed open-consensus runs (--help)')
 
   console.log('\ninstall-from-pack smoke passed')
