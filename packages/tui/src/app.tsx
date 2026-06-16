@@ -99,14 +99,16 @@ export function App(props: AppProps): ReactElement {
     print,
     ensureDaemon: props.ensureDaemon,
     viewRun: (id) => {
-      // If Ctrl+C was pressed while this run was starting, cancel it immediately
-      // instead of opening a live view that the user already asked to abort.
+      // Always stream the run. If Ctrl+C was pressed while it was starting, ALSO
+      // request a cancel — identical to the active-run path, so a failed/slow
+      // cancel keeps the run visible (a second Ctrl+C exits) instead of dropping
+      // it from view while it's still alive on the daemon.
+      setRunId(id)
       if (cancelRequested.current) {
         cancelRequested.current = false
+        cancelling.current = true
         cancelRun(id)
-        return
       }
-      setRunId(id)
     },
     hasActiveRun: () => runId !== undefined,
     quit: () => doExit(),

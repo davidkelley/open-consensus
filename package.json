@@ -7,7 +7,7 @@
   "license": "MIT",
   "author": "David Kelley",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "packageManager": "npm@11.11.0",
   "workspaces": ["packages/*"],
