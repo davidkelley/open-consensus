@@ -117,6 +117,7 @@ describe('real adapters', () => {
       'review this',
       '-m',
       'gemini-3.1-pro',
+      '--skip-trust', // trusts the ephemeral scratch cwd so plan mode is honored
       '--approval-mode',
       'plan',
       '-o',

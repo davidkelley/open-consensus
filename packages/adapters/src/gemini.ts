@@ -25,6 +25,13 @@ const FORBIDDEN = ['--approval-mode', '-o', '--output-format', '-y', '--yolo']
  * not secret (secrets travel via env, D5), with the size cap + `ps`-visibility the
  * documented residual. The mandatory safety/output flags are appended LAST so a
  * config `arg` can't override them.
+ *
+ * `--skip-trust` is mandatory, not optional: every invocation runs in an ephemeral
+ * scratch cwd (D20), which gemini treats as an UNtrusted folder — so without it
+ * gemini 0.46+ refuses outright (exit 55) AND silently downgrades `--approval-mode
+ * plan` to the looser `default`. Trusting the throwaway cwd is what lets the run
+ * proceed in the intended read-only plan mode (the dir is read-only/disposable, so
+ * trusting it grants nothing the D20 scratch model didn't already accept).
  */
 export function createGeminiAdapter(options: AdapterOptions = {}): Adapter {
   const bin = lazyBinary(options.binPath ?? 'gemini')
@@ -45,7 +52,9 @@ export function createGeminiAdapter(options: AdapterOptions = {}): Adapter {
         args.push(...ctx.args)
       }
       if (ctx.model) args.push('-m', ctx.model)
-      args.push('--approval-mode', 'plan', '-o', 'json') // last: wins
+      // last: wins. `--skip-trust` trusts the ephemeral scratch cwd so the run
+      // proceeds AND `--approval-mode plan` (read-only) is actually honored.
+      args.push('--skip-trust', '--approval-mode', 'plan', '-o', 'json')
       return { file: bin(), args, env: ctx.env ?? {} }
     },
     parse(result: RunResult, _ctx: AdapterInvocationContext): AdapterParseResult {
