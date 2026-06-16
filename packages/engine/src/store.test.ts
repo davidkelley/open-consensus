@@ -61,6 +61,24 @@ describe('EngineStore', () => {
     s.close()
   })
 
+  it('catches corrupt round rows on read: bad boolean + complete-without-verdict (D17)', () => {
+    const dbPath = join(dir, 'corrupt-round.sqlite')
+    const s = new EngineStore({ dbPath, rawDir: join(dir, 'rawcr') })
+    s.createRun(run('r'))
+    s.startRound({ roundId: 'rd', runId: 'r', index: 0, prompt: 'p', quorum: 1, state: 'running' })
+    s.upsertInvocation('rd', okInv('a'))
+    s.completeRound('rd', 'met')
+
+    const raw = new Database(dbPath)
+    raw.prepare("UPDATE invocations SET truncated = 2 WHERE roundId = 'rd'").run()
+    expect(() => s.getRound('rd')).toThrow(/corrupt boolean/) // truncated must be 0|1
+    raw.prepare("UPDATE invocations SET truncated = 0 WHERE roundId = 'rd'").run()
+    raw.prepare("UPDATE rounds SET verdict = NULL WHERE roundId = 'rd'").run()
+    raw.close()
+    expect(() => s.getRound('rd')).toThrow(/complete round/) // complete needs a verdict
+    s.close()
+  })
+
   it('persists a run/round/invocation and reads them back', () => {
     store.createRun(run())
     startRound(store)

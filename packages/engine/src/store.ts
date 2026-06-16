@@ -23,6 +23,19 @@ import {
  * result sets / raw blobs stay light per D17.
  */
 const roundWriteSchema = roundRecordSchema.omit({ invocations: true, verdict: true })
+/** Read-side tightening (D17): a `complete` round must carry a verdict, so a row
+ * corrupted to complete-without-verdict is caught rather than read back as a
+ * finished round with no result. */
+const roundReadSchema = roundRecordSchema.refine(
+  (r) => r.state !== 'complete' || r.verdict !== undefined,
+  { message: 'a complete round must have a verdict' },
+)
+
+/** A persisted boolean column is 0 or 1; any other value is corruption (D17). */
+function toBool01(n: number): boolean {
+  if (n !== 0 && n !== 1) throw new Error(`corrupt boolean column value: ${n}`)
+  return n === 1
+}
 
 const SCHEMA_VERSION = 3
 
@@ -418,8 +431,8 @@ export class EngineStore {
       .prepare('SELECT * FROM invocations WHERE roundId = ? ORDER BY agentId')
       .all(roundId) as InvocationRow[]
     // Validate the assembled record on read (D17) — a corrupt status/verdict/state
-    // is caught here, not propagated downstream.
-    return roundRecordSchema.parse({
+    // /boolean is caught here, not propagated downstream.
+    return roundReadSchema.parse({
       roundId: row.roundId,
       runId: row.runId,
       index: row.idx,
@@ -434,7 +447,7 @@ export class EngineStore {
         distilled: r.distilled,
         ...(r.errorClass ? { errorClass: r.errorClass } : {}),
         durationMs: r.durationMs,
-        truncated: r.truncated === 1,
+        truncated: toBool01(r.truncated),
         ...(r.rawRef ? { rawRef: r.rawRef } : {}),
       })),
     })
