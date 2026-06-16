@@ -5,6 +5,7 @@
  * MCP → daemon → engine stack in-process, and lets embedders reuse the pieces.
  */
 export { createMcpServer, resolveClient, discoveryPath } from './server'
+export { runMcpStdioServer } from './run'
 export {
   type DaemonClient,
   type PanelSummary,

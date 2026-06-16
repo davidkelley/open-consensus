@@ -18,6 +18,7 @@
     "@open-consensus/config": "*",
     "@open-consensus/core": "*",
     "@open-consensus/daemon": "*",
+    "@open-consensus/mcp": "*",
     "@open-consensus/tui": "*",
     "commander": "^12.1.0"
   },

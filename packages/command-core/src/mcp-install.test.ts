@@ -2,7 +2,27 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { DEFAULT_MCP_ENTRY, mcpInstallCommand, mcpUninstallCommand } from './mcp-install'
+import {
+  DEFAULT_MCP_ENTRY,
+  defaultMcpEntry,
+  mcpInstallCommand,
+  mcpUninstallCommand,
+} from './mcp-install'
+
+describe('defaultMcpEntry', () => {
+  it('registers the absolute binary path + mcp-server when packaged', () => {
+    expect(defaultMcpEntry({ packaged: true, execPath: '/usr/local/bin/open-consensus' })).toEqual({
+      command: '/usr/local/bin/open-consensus',
+      args: ['mcp-server'],
+    })
+  })
+
+  it('registers the published open-consensus-mcp bin from source', () => {
+    expect(defaultMcpEntry({ packaged: false, execPath: '/usr/bin/node' })).toEqual(
+      DEFAULT_MCP_ENTRY,
+    )
+  })
+})
 
 let dir: string
 let hostPath: string

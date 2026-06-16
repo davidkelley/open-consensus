@@ -28,6 +28,7 @@ export function packageVitestConfig(): UserConfig {
           'src/index.ts',
           'src/cli.ts',
           'src/mcp.ts',
+          'src/run.ts',
           'src/tui.tsx',
         ],
         thresholds: { lines: 90, branches: 90, functions: 90, statements: 90 },

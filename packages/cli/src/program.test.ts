@@ -104,6 +104,10 @@ beforeEach(async () => {
     launchTui: async () => {
       out.push('tui-launched')
     },
+    runMcpServer: async () => {
+      out.push('mcp-server-ran')
+    },
+    defaultMcpEntry: { command: 'open-consensus-mcp', args: [] },
     ensureAttempts: 20,
     ensureIntervalMs: 5,
   }
@@ -439,6 +443,26 @@ describe('mcp install/uninstall', () => {
     expect(JSON.parse(readFileSync(host, 'utf8')).mcpServers['oc-dev']).toBeDefined()
     await run(argv('mcp', 'uninstall', '--name', 'oc-dev', '--config', host), deps)
     expect(JSON.parse(readFileSync(host, 'utf8')).mcpServers['oc-dev']).toBeUndefined()
+  })
+
+  it('registers deps.defaultMcpEntry (the packaged binary self-registration) when no --command', async () => {
+    // In a packaged binary cli.ts injects the binary-path entry; assert install
+    // writes exactly that, so a fresh binary install registers `<binary> mcp-server`.
+    deps.defaultMcpEntry = { command: '/usr/local/bin/open-consensus', args: ['mcp-server'] }
+    await run(argv('mcp', 'install'), deps)
+    expect(JSON.parse(readFileSync(deps.mcpHostPath, 'utf8')).mcpServers['open-consensus']).toEqual(
+      {
+        command: '/usr/local/bin/open-consensus',
+        args: ['mcp-server'],
+      },
+    )
+  })
+})
+
+describe('mcp-server', () => {
+  it('runs the stdio MCP server via the injected runner', async () => {
+    await run(argv('mcp-server'), deps)
+    expect(out).toContain('mcp-server-ran')
   })
 })
 

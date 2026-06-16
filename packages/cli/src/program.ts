@@ -2,6 +2,7 @@ import {
   type AddAgentInput,
   type ConfigContext,
   type InstallResult,
+  type McpServerEntry,
   type RunStatusView,
   addAgentCommand,
   createPanelCommand,
@@ -57,6 +58,14 @@ export interface CliDeps {
   mcpHostPath: string
   /** Launch the interactive TUI (run when `open-consensus` is given no subcommand). */
   launchTui: () => Promise<void>
+  /** Run the stdio MCP server (the `mcp-server` subcommand the binary self-registers). */
+  runMcpServer: () => Promise<void>
+  /**
+   * The entry `mcp install` registers when the user passes no `--command`: the
+   * packaged binary path + `mcp-server`, or the published `open-consensus-mcp` bin
+   * from source (computed in `cli.ts` from `isPackaged()`).
+   */
+  defaultMcpEntry: McpServerEntry
   /** Readiness poll knobs (tests shrink these). */
   ensureAttempts?: number
   ensureIntervalMs?: number
@@ -128,6 +137,17 @@ export function buildProgram(deps: CliDeps): Command {
   buildRunCommands(program, deps, ensureOpts)
   buildInitCommand(program, deps, ctx)
   buildMcpCommands(program, deps)
+
+  // The stdio MCP server, multiplexed into the single `open-consensus` binary
+  // (D2). This is what `mcp install` registers in a host config when packaged
+  // (`<binary> mcp-server`); it owns its own stdin-close lifecycle and does NOT
+  // launch the TUI or auto-start the daemon.
+  program
+    .command('mcp-server')
+    .description('run the stdio MCP server (registered into MCP hosts by `mcp install`)')
+    .action(async () => {
+      await deps.runMcpServer()
+    })
 
   return program
 }
@@ -472,12 +492,17 @@ function buildMcpCommands(program: Command, deps: CliDeps): void {
       if (opts.arg.length > 0 && !opts.command) {
         throw new CliError('--arg only applies with --command (it sets that command’s args)')
       }
+      // No --command -> register the entry appropriate to how WE were launched: the
+      // packaged binary path + `mcp-server`, or `open-consensus-mcp` from source.
+      const entry: McpServerEntry = opts.command
+        ? { command: opts.command, args: opts.arg }
+        : deps.defaultMcpEntry
       const result = mcpInstallCommand({
         host: {
           path: opts.config ?? deps.mcpHostPath,
           ...(opts.name ? { serverName: opts.name } : {}),
         },
-        ...(opts.command ? { entry: { command: opts.command, args: opts.arg } } : {}),
+        entry,
         ...(opts.force ? { force: true } : {}),
       })
       reportInstall(result, deps)

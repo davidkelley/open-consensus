@@ -240,6 +240,17 @@ export function spawnDetachedDaemon(launcher: DaemonLauncher): ChildProcess {
   return child
 }
 
+/**
+ * Args to (re)spawn THIS process as the foreground daemon (`daemon serve`). In a
+ * packaged single binary the executable IS the binary (`process.execPath`) and the
+ * subcommand alone is enough — there is no on-disk script to pass (`import.meta.url`
+ * resolves to a virtual `/snapshot/...` path that does not exist). From source we
+ * pass the resolved CLI entry file so `node <cliEntry> daemon serve` runs.
+ */
+export function daemonSpawnArgs(opts: { packaged: boolean; cliEntry: string }): string[] {
+  return opts.packaged ? ['daemon', 'serve'] : [opts.cliEntry, 'daemon', 'serve']
+}
+
 export interface EnsureDaemonDeps {
   discoveryPath: string
   /** Start the daemon when it isn't already healthy (spawn detached, or in-process for tests). */

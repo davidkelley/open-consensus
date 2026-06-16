@@ -8,6 +8,7 @@ import {
   DaemonNotRunningError,
   DaemonRpcError,
   cancelRunCommand,
+  daemonSpawnArgs,
   daemonStatusCommand,
   ensureDaemonRunning,
   listDaemonPanelsCommand,
@@ -316,6 +317,23 @@ describe('spawnDetachedDaemon', () => {
     const child = spawnDetachedDaemon({ command: process.execPath, args: ['-e', ''] })
     expect(typeof child.pid).toBe('number')
     child.on('error', () => {}) // ignore — the no-op child exits immediately
+  })
+})
+
+describe('daemonSpawnArgs', () => {
+  it('drops the cliEntry when packaged (the binary re-execs itself via execPath)', () => {
+    expect(daemonSpawnArgs({ packaged: true, cliEntry: '/snapshot/app/cli.js' })).toEqual([
+      'daemon',
+      'serve',
+    ])
+  })
+
+  it('passes the cliEntry from source (node <cliEntry> daemon serve)', () => {
+    expect(daemonSpawnArgs({ packaged: false, cliEntry: '/abs/dist/cli.js' })).toEqual([
+      '/abs/dist/cli.js',
+      'daemon',
+      'serve',
+    ])
   })
 })
 

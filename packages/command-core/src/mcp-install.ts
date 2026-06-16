@@ -25,6 +25,19 @@ export interface McpServerEntry {
 /** The default registered entry: the published `open-consensus-mcp` stdio bin. */
 export const DEFAULT_MCP_ENTRY: McpServerEntry = { command: 'open-consensus-mcp', args: [] }
 
+/**
+ * The MCP entry to register for THIS install. In a packaged single binary there is
+ * no separate `open-consensus-mcp` on `PATH` — the server is the binary itself
+ * invoked as `<binary> mcp-server`, registered by its ABSOLUTE path (the host may
+ * not share the user's `PATH`). From source we keep the published `open-consensus-mcp`
+ * bin. (If the binary is later moved, re-running `mcp install` refreshes the path.)
+ */
+export function defaultMcpEntry(opts: { packaged: boolean; execPath: string }): McpServerEntry {
+  return opts.packaged
+    ? { command: opts.execPath, args: ['mcp-server'] }
+    : { command: 'open-consensus-mcp', args: [] }
+}
+
 const DEFAULT_SERVER_NAME = 'open-consensus'
 
 export type InstallAction = 'installed' | 'unchanged' | 'updated' | 'conflict'
