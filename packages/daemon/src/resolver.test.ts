@@ -29,13 +29,31 @@ describe('resolvePanel', () => {
     expect(panel?.agents[0]?.adapter.id).toBe('mock')
     // a2 has no model -> the optional field is omitted, not set to undefined.
     expect('model' in (panel?.agents[1] ?? {})).toBe(false)
+    // Fully resolvable -> no unavailable members reported.
+    expect(panel?.unavailableAgentIds).toBeUndefined()
   })
 
   it('returns undefined for an unknown panel', () => {
     expect(resolvePanel(cfg(), registry, 'ghost')).toBeUndefined()
   })
 
-  it('drops agents whose adapter is not in the registry', () => {
+  it('surfaces an agent whose adapter is not in the registry as unavailable, not silently dropped', () => {
+    const config = parseConfig({
+      schemaVersion: 1,
+      agents: [
+        { id: 'a1', name: 'A1', adapter: 'mock' },
+        { id: 'ghost', name: 'Ghost', adapter: 'nonexistent' },
+      ],
+      panels: [{ id: 'p1', name: 'P1', agentIds: ['a1', 'ghost'], quorum: 1 }],
+    })
+    const panel = resolvePanel(config, registry, 'p1')
+    // The resolvable agent runs; the unknown-adapter member is reported by NAME
+    // (D13) so a partial drop can't read a false `met` with a member that vanished.
+    expect(panel?.agents.map((a) => a.agentId)).toEqual(['a1'])
+    expect(panel?.unavailableAgentIds).toEqual(['ghost'])
+  })
+
+  it('all agents unresolvable -> empty agents but every id reported as unavailable', () => {
     const config = parseConfig({
       schemaVersion: 1,
       agents: [{ id: 'a1', name: 'A1', adapter: 'nonexistent' }],
@@ -43,14 +61,16 @@ describe('resolvePanel', () => {
     })
     const panel = resolvePanel(config, registry, 'p1')
     expect(panel?.agents).toHaveLength(0)
+    expect(panel?.unavailableAgentIds).toEqual(['a1'])
   })
 
-  it('skips a panel agent id that no longer exists in the roster', () => {
+  it('reports a panel agent id that no longer exists in the roster as unavailable', () => {
     // Build a config, then mutate it past schema validation to drop the agent
-    // (simulating drift). The resolver must skip the dangling id, not throw.
+    // (simulating drift). The resolver must surface the dangling id, not throw.
     const config = cfg()
     const drifted: Config = { ...config, agents: config.agents.filter((a) => a.id !== 'a2') }
     const panel = resolvePanel(drifted, registry, 'p1')
     expect(panel?.agents.map((a) => a.agentId)).toEqual(['a1'])
+    expect(panel?.unavailableAgentIds).toEqual(['a2'])
   })
 })

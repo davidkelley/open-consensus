@@ -8,8 +8,12 @@ export type AdapterRegistry = Map<string, Adapter>
 /**
  * Resolve a configured panel into a runnable engine {@link Panel}: look up each
  * agent and bind it to its adapter instance. An agent whose adapter id is not in
- * the registry is dropped (a misconfig — the registry should carry every real
- * adapter; runtime unavailability is handled later by `detect()`/spawn-error).
+ * the registry can't be dispatched (e.g. a hand-edited/typo'd, or a removed/
+ * renamed-on-upgrade adapter id — the config schema accepts any adapter string
+ * and isn't cross-checked against the runtime registry); its id is surfaced as
+ * `unavailableAgentIds` so the engine records it as a terminal `unavailable`
+ * invocation (reported by name, D13) rather than silently dropping it — a silent
+ * drop could read a false `met` verdict while a declared panel member never ran.
  * Returns `undefined` when the panel id is unknown.
  */
 export function resolvePanel(
@@ -21,11 +25,20 @@ export function resolvePanel(
   if (!panel) return undefined
 
   const agents: PanelAgent[] = []
+  const unavailableAgentIds: string[] = []
   for (const agentId of panel.agentIds) {
     const agent = config.agents.find((a) => a.id === agentId)
-    if (!agent) continue
+    // A dangling agent ref is rejected by the config schema's referential-
+    // integrity check, but guard anyway — and report it like an unknown adapter.
+    if (!agent) {
+      unavailableAgentIds.push(agentId)
+      continue
+    }
     const adapter = registry.get(agent.adapter)
-    if (!adapter) continue
+    if (!adapter) {
+      unavailableAgentIds.push(agent.id)
+      continue
+    }
     agents.push({
       agentId: agent.id,
       adapter,
@@ -42,5 +55,6 @@ export function resolvePanel(
     quorum: panel.quorum,
     ...(panel.concurrency ? { concurrency: panel.concurrency } : {}),
     agents,
+    ...(unavailableAgentIds.length > 0 ? { unavailableAgentIds } : {}),
   }
 }

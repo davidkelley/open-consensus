@@ -86,6 +86,68 @@ describe('Engine.dispatchRound', () => {
     expect(store.getRound(round.roundId)?.verdict).toBe('met')
   })
 
+  it('forwards allowlisted identity/config env (USER) to the child; agent env overrides win', async () => {
+    // Regression (found by the live-e2e): the `claude` CLI's macOS-Keychain auth
+    // keys on USER, so the engine MUST forward it or every claude run reports
+    // "Not logged in". The runner drops the inherited env, so this is the only path.
+    const prevUser = process.env.USER
+    process.env.USER = 'oc-test-user'
+    try {
+      let captured: Record<string, string> | undefined
+      const capturing: Adapter = {
+        id: 'capture',
+        capabilities: caps,
+        detect: () => Promise.resolve({ available: true }),
+        buildInvocation: (ctx) => {
+          captured = ctx.env
+          return { file: process.execPath, args: ['-e', ''], env: ctx.env ?? {} }
+        },
+        parse: () => ({ status: 'ok', text: '' }),
+      }
+      const run = engine.createRun('p')
+      await engine.dispatchRound(
+        run,
+        {
+          panelId: 'p',
+          quorum: 1,
+          agents: [agent('c', 'ok', { adapter: capturing, env: { CUSTOM: 'v' } })],
+        },
+        'hi',
+      )
+      expect(captured?.USER).toBe('oc-test-user') // identity var forwarded
+      expect(captured?.CUSTOM).toBe('v') // agent-configured env layered on top
+    } finally {
+      if (prevUser === undefined) Reflect.deleteProperty(process.env, 'USER')
+      else process.env.USER = prevUser
+    }
+  })
+
+  it('reports a declared agent with an unresolvable adapter as terminal `unavailable` (D13)', async () => {
+    // Regression (found by the deep-dive audit): an unknown-adapter panel member
+    // must be reported by name, not silently dropped — else the orchestrator can't
+    // tell a declared member never ran (a false-success D13 forbids).
+    const run = engine.createRun('p')
+    const round = await engine.dispatchRound(
+      run,
+      { panelId: 'p', quorum: 3, agents: [agent('a'), agent('b')], unavailableAgentIds: ['ghost'] },
+      'hi',
+    )
+    // All THREE declared members appear in the round (2 resolved + 1 unavailable).
+    expect(round.invocations.map((i) => i.agentId).sort()).toEqual(['a', 'b', 'ghost'])
+    const ghost = round.invocations.find((i) => i.agentId === 'ghost')
+    expect(ghost?.status).toBe('unavailable')
+    expect(ghost?.errorClass).toBe('unknown-adapter')
+    expect(ghost?.attempts).toBe(0)
+    // Round is complete (every invocation terminal); quorum 3 is NOT met by the 2
+    // real oks — and the orchestrator can see WHY (ghost is reported, never ran).
+    expect(round.state).toBe('complete')
+    expect(round.verdict).toBe('degraded')
+    // Reported by name on the persisted read too.
+    expect(
+      store.getRound(round.roundId)?.invocations.find((i) => i.agentId === 'ghost')?.status,
+    ).toBe('unavailable')
+  })
+
   it('honors a caller-provided roundId (async daemon tracking)', async () => {
     const run = engine.createRun('p')
     const round = await engine.dispatchRound(

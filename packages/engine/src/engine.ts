@@ -38,6 +38,13 @@ export interface Panel {
   /** Per-round concurrency cap (in addition to the engine-global cap). */
   concurrency?: number
   agents: PanelAgent[]
+  /**
+   * Declared panel members whose configured adapter id is NOT in the registry,
+   * so they can't be dispatched. They are recorded as terminal `unavailable`
+   * invocations (reported by name, D13) rather than silently dropped — otherwise
+   * a partial drop could read a false `met` verdict against the panel's quorum.
+   */
+  unavailableAgentIds?: string[]
 }
 
 export interface DispatchOptions {
@@ -119,12 +126,30 @@ function placeholder(agentId: string, status: InvocationStatus): InvocationRecor
 
 /**
  * Compose the child env (the runner drops the inherited env, so the engine MUST
- * supply a usable one — Stage 3 contract). Allowlist a sanitized PATH + a few
- * vars adapters need for auth/config, then the agent's configured overrides.
+ * supply a usable one — Stage 3 contract). Allowlist a sanitized PATH plus the
+ * non-secret identity/config vars a CLI needs to locate THIS user's credentials
+ * and config, then layer the agent's configured overrides on top. The identity
+ * vars matter: e.g. the `claude` CLI's macOS-Keychain auth lookup keys on `USER`,
+ * so dropping it makes every invocation report "Not logged in" (proven by the
+ * live-e2e); CLIs also read credentials/config under the XDG dirs. Secrets are
+ * NOT auto-forwarded — key-based auth (e.g. `ANTHROPIC_API_KEY`) must be set
+ * explicitly via the agent's `env` config so the daemon's env can't silently
+ * leak a token into every panel child.
  */
 function composeEnv(agentEnv?: Record<string, string>): Record<string, string> {
   const base: Record<string, string> = {}
-  for (const key of ['PATH', 'HOME', 'SystemRoot', 'LANG', 'TMPDIR'] as const) {
+  for (const key of [
+    'PATH',
+    'HOME',
+    'USER',
+    'LOGNAME',
+    'SystemRoot',
+    'LANG',
+    'TMPDIR',
+    'XDG_CONFIG_HOME',
+    'XDG_DATA_HOME',
+    'XDG_CACHE_HOME',
+  ] as const) {
     const value = process.env[key]
     if (value !== undefined) base[key] = value
   }
@@ -239,7 +264,10 @@ export class Engine {
     const roundId = options.roundId ?? randomUUID()
     const index = 0
     const safePrompt = redactString(prompt)
-    const agentIds = panel.agents.map((a) => a.agentId)
+    // Every DECLARED member (resolvable + unavailable) gets a pending row + is
+    // listed in round-started, so an unresolvable-adapter agent is reported by
+    // name (D13), not silently absent from the round.
+    const agentIds = [...panel.agents.map((a) => a.agentId), ...(panel.unavailableAgentIds ?? [])]
     const runCreated: EngineEvent = { type: 'run-created', runId: run.runId, panelId }
     const roundStarted: EngineEvent = {
       type: 'round-started',
@@ -291,7 +319,10 @@ export class Engine {
   ): Promise<RoundRecord> {
     const roundId = options.roundId ?? randomUUID()
     const index = this.store.countRounds(run.runId)
-    const agentIds = panel.agents.map((a) => a.agentId)
+    // Every DECLARED member (resolvable + unavailable) gets a pending row + is
+    // listed in round-started, so an unresolvable-adapter agent is reported by
+    // name (D13), not silently absent from the round.
+    const agentIds = [...panel.agents.map((a) => a.agentId), ...(panel.unavailableAgentIds ?? [])]
     // The prompt is user-supplied and may carry a pasted secret, so the PERSISTED
     // + served copy is redacted (D10); agents still receive the original prompt.
     const safePrompt = redactString(prompt)
@@ -334,9 +365,14 @@ export class Engine {
     panel: Panel,
     options: DispatchOptions,
   ): Promise<RoundRecord> {
+    // Declared members with no resolvable adapter can't be dispatched; record them
+    // as terminal `unavailable` (reported by name, D13) BEFORE the quorum verdict,
+    // so a config typo/drift can never silently inflate a `met`.
+    const unavailable = this.recordUnavailable(run, roundId, panel)
     let invocations: InvocationRecord[]
     try {
-      invocations = await this.dispatchAgents(run, roundId, panel, prompt, options)
+      const dispatched = await this.dispatchAgents(run, roundId, panel, prompt, options)
+      invocations = [...dispatched, ...unavailable]
     } catch (err) {
       // Defensive: executeAgent is built never to throw, but if dispatch fails
       // catastrophically, never leave the round stuck `running`.
@@ -367,6 +403,31 @@ export class Engine {
       verdict,
       invocations,
     }
+  }
+
+  /**
+   * Record each declared-but-unresolvable panel member (unknown adapter id) as a
+   * terminal `unavailable` invocation. Its pending row already exists (it's in the
+   * round's agentIds); this finalizes it so the agent is reported by name with an
+   * error class (D13) and counts toward "all terminal" — but never toward quorum
+   * `ok`, so a partial drop can't read a false `met`.
+   */
+  private recordUnavailable(run: RunRecord, roundId: string, panel: Panel): InvocationRecord[] {
+    return (panel.unavailableAgentIds ?? []).map((agentId) => {
+      const record: InvocationRecord = {
+        ...placeholder(agentId, 'unavailable'),
+        errorClass: 'unknown-adapter',
+      }
+      this.persistWith(run.runId, () => this.store.upsertInvocation(roundId, record), {
+        type: 'invocation-finished',
+        runId: run.runId,
+        roundId,
+        agentId,
+        status: 'unavailable',
+        attempts: 0,
+      })
+      return record
+    })
   }
 
   private dispatchAgents(

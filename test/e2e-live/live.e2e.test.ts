@@ -110,7 +110,11 @@ describe('consensus live-e2e (real agents)', () => {
     }
     // With concurrency:1 the real agents run sequentially and a single (server-capped)
     // long-poll can return before the round finishes — re-poll until done.
-    let round: { done: boolean; verdict: string; agents: Array<{ status: string }> }
+    let round: {
+      done: boolean
+      verdict: string
+      agents: Array<{ agentId?: string; status: string; errorClass?: string }>
+    }
     const deadline = Date.now() + 5 * 60_000
     do {
       round = (await call('consensus_poll', {
@@ -120,10 +124,22 @@ describe('consensus live-e2e (real agents)', () => {
       })) as typeof round
     } while (!round.done && Date.now() < deadline)
 
-    expect(round.done).toBe(true)
+    // Always surface the per-agent breakdown: the quorum assertion alone can pass
+    // on a single ok while OTHER configured adapters error for an integration
+    // reason (a dropped auth env var, an untrusted-cwd refusal) — make that
+    // visible to the operator running the gate instead of a silent green.
+    const breakdown = round.agents
+      .map((a) => `${a.agentId ?? '?'}=${a.status}${a.errorClass ? `(${a.errorClass})` : ''}`)
+      .join(' ')
+    console.log(`[live-e2e] ids=${ids.join(',')} verdict=${round.verdict} | ${breakdown}`)
+
+    expect(round.done, `round never finished: ${breakdown}`).toBe(true)
     // At least one real agent answered ok; the verdict is met or degraded (never
     // a hang — every invocation reaches a terminal state via the per-agent timeout).
-    expect(round.agents.some((a) => a.status === 'ok')).toBe(true)
+    expect(
+      round.agents.some((a) => a.status === 'ok'),
+      `no agent returned ok: ${breakdown}`,
+    ).toBe(true)
     expect(['met', 'degraded']).toContain(round.verdict)
   })
 })
