@@ -19,6 +19,8 @@
     "lint:fix": "biome check --write . && eslint packages/*/src --fix",
     "format": "biome format --write .",
     "format:check": "biome format .",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "smoke:pack": "node scripts/smoke-pack.mjs",
     "test:e2e:live": "OPEN_CONSENSUS_E2E_LIVE=1 vitest run --config vitest.e2e-live.config.ts"
   },
   "devDependencies": {
