@@ -50,12 +50,15 @@ export function App(props: AppProps): ReactElement {
   // A Ctrl+C arrived during that dispatch window — cancel the run once its id lands.
   const cancelRequested = useRef(false)
 
-  // Stable across renders (setLines + idRef are stable) so the completion effect
-  // can list it as a dependency without re-firing every render. The id is read
-  // OUTSIDE the updater so React 19 StrictMode's double-invoke can't skip ids.
+  // The single transcript sink — so redaction here guarantees NOTHING unredacted
+  // reaches the terminal's persistent scrollback, regardless of which handler,
+  // command result, or caught error produced the line (D10/D19). Stable across
+  // renders; the id is read OUTSIDE the updater so React 19 StrictMode's
+  // double-invoke can't skip ids.
   const print = useCallback((text: string): void => {
     const id = idRef.current++
-    setLines((prev) => [...prev, { id, text }])
+    const safe = redactString(text)
+    setLines((prev) => [...prev, { id, text: safe }])
   }, [])
 
   // Request a server-side cancel of a run (the daemon tree-kills the child and
@@ -117,9 +120,7 @@ export function App(props: AppProps): ReactElement {
   const handleSubmit = (line: string): void => {
     const parsed = parseLine(line)
     if (parsed.kind === 'empty') return
-    // Redact before echoing: a pasted prompt/arg could carry a secret (D10) and
-    // the echo lands in the terminal's persistent scrollback.
-    print(`› ${redactString(line)}`)
+    print(`› ${line}`) // print() redacts at the sink (a pasted arg may carry a secret)
     if (parsed.kind === 'text') {
       print('not a command — type /help (every action is a /command)')
       return
