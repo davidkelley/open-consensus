@@ -14,6 +14,7 @@ let dir: string
 let out: string[]
 let viewed: string[]
 let quit: number
+let active: boolean
 let server: Server
 let endpoint: string
 let ctx: SlashContext
@@ -61,6 +62,7 @@ beforeEach(async () => {
   out = []
   viewed = []
   quit = 0
+  active = false
   await startServer()
   writeFileSync(
     join(dir, 'discovery.json'),
@@ -73,6 +75,7 @@ beforeEach(async () => {
     print: (l) => out.push(l),
     ensureDaemon: async () => undefined,
     viewRun: (id) => viewed.push(id),
+    hasActiveRun: () => active,
     quit: () => {
       quit += 1
     },
@@ -175,6 +178,16 @@ describe('slash registry', () => {
 
   it('/run requires a prompt', async () => {
     await expect(dispatch('run p')).rejects.toThrow(/missing prompt/)
+  })
+
+  it('/run refuses to start while a run is already streaming', async () => {
+    active = true
+    await expect(dispatch('run p review this')).rejects.toThrow(/already streaming/)
+    expect(viewed).toEqual([]) // never started a second run
+  })
+
+  it('/daemon rejects an unknown subcommand', async () => {
+    await expect(dispatch('daemon restart')).rejects.toThrow(/unknown daemon subcommand/)
   })
 
   it('/daemon shows status and /quit exits', async () => {

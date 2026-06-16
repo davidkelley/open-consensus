@@ -186,7 +186,8 @@ function httpConnect(
   lastEventId: number,
   handlers: ConnectHandlers,
 ): RawConnection {
-  const isHttp = discovery.endpoint.startsWith('http://')
+  const isHttp =
+    discovery.endpoint.startsWith('http://') || discovery.endpoint.startsWith('https://')
   const headers: Record<string, string> = {
     authorization: `Bearer ${discovery.token}`,
     accept: 'text/event-stream',
@@ -197,17 +198,41 @@ function httpConnect(
     ? { ...common, ...hostPort(discovery.endpoint) }
     : { ...common, socketPath: discovery.endpoint }
 
+  // `end`, `close`, and `error` can all fire for one response — guard so a single
+  // connection schedules at most ONE reconnect (otherwise parallel reconnects
+  // storm the daemon).
+  let closedOnce = false
+  const closeOnce = (): void => {
+    if (closedOnce) return
+    closedOnce = true
+    handlers.onClose()
+  }
+
   const req = request(options, (res) => {
+    // A non-2xx (401/503) or non-SSE response is NOT an open stream — draining +
+    // reconnecting WITHOUT calling onOpen keeps backoff growing instead of
+    // hammering a stale-token / overloaded daemon.
+    const status = res.statusCode ?? 0
+    if (status < 200 || status >= 300) {
+      res.resume() // drain so the socket can be freed
+      closeOnce()
+      return
+    }
     handlers.onOpen()
     res.setEncoding('utf8')
     res.on('data', (chunk: string) => handlers.onChunk(chunk))
-    res.on('end', () => handlers.onClose())
-    res.on('close', () => handlers.onClose())
-    res.on('error', () => handlers.onClose())
+    res.on('end', closeOnce)
+    res.on('close', closeOnce)
+    res.on('error', closeOnce)
   })
-  req.on('error', () => handlers.onClose())
+  req.on('error', closeOnce)
   req.end()
-  return { close: () => req.destroy() }
+  return {
+    close: () => {
+      closedOnce = true // a deliberate close must not trigger a reconnect
+      req.destroy()
+    },
+  }
 }
 
 function hostPort(endpoint: string): { host: string; port: number } {

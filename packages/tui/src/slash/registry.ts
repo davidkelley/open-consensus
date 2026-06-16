@@ -31,6 +31,8 @@ export interface SlashContext {
   ensureDaemon: () => Promise<void>
   /** Begin streaming a run's live timeline into the in-progress region. */
   viewRun: (runId: string) => void
+  /** True while a run is already streaming in the live region (single-view UI). */
+  hasActiveRun: () => boolean
   /** Request the app to exit. */
   quit: () => void
 }
@@ -89,10 +91,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
         ctx.print(`removed agent '${id}'`)
       } else if (sub === 'test') {
         const r = await testAgentCommand(ctx.configCtx, id, ctx.registry)
-        ctx.print(
-          `${r.adapter}: ${r.detected.available ? `available (${r.detected.version ?? '?'})` : `unavailable (${r.detected.reason ?? '?'})`}`,
-        )
+        const avail = r.detected.available
+          ? `available (${r.detected.version ?? '?'})`
+          : `unavailable (${r.detected.reason ?? '?'})`
+        ctx.print(`${r.adapter}: ${avail}`)
         ctx.print(`would run: ${r.invocation.file} ${r.invocation.args.join(' ')}`)
+        const envKeys = r.invocation.envKeys.join(', ') || '(none)'
+        ctx.print(`prompt delivery: ${r.invocation.promptDelivery}  env: ${envKeys}`)
       } else {
         throw new Error(`unknown agent subcommand '${sub}'`)
       }
@@ -152,6 +157,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     summary: 'start a consensus run and watch it live',
     usage: '/run <panel> <prompt…>',
     async run(ctx, args, rest) {
+      if (ctx.hasActiveRun()) {
+        throw new Error('a run is already streaming — press Ctrl+C to cancel it first')
+      }
       const panel = requireArg(args, 0, 'panel id')
       const prompt = rest.slice(rest.indexOf(panel) + panel.length).trim()
       if (prompt.length === 0) throw new Error('missing prompt')
@@ -165,7 +173,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: 'daemon',
     summary: 'show daemon status',
     usage: '/daemon status',
-    async run(ctx) {
+    async run(ctx, args) {
+      const sub = args[0] ?? 'status'
+      if (sub !== 'status') throw new Error(`unknown daemon subcommand '${sub}' (only: status)`)
       const status = await daemonStatusCommand(ctx.discoveryPath)
       if (!status.running) return ctx.print('daemon is not running')
       ctx.print(

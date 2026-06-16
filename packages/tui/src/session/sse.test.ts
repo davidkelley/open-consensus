@@ -154,6 +154,59 @@ describe('startEventStream', () => {
     }
   })
 
+  it('schedules exactly ONE reconnect when a clean end+close both fire', async () => {
+    let server: Server | undefined
+    try {
+      server = createServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.write('id: 1\ndata: {"type":"run-abandoned","runId":"r"}\n\n')
+        setTimeout(() => res.end(), 10) // clean end -> both 'end' and 'close' fire
+      })
+      await new Promise<void>((r) => server?.listen(0, '127.0.0.1', () => r()))
+      const addr = server.address()
+      const port = addr && typeof addr === 'object' ? addr.port : 0
+      const statuses: StreamStatus[] = []
+      const stream = startEventStream({
+        resolveDiscovery: () => ({ endpoint: `http://127.0.0.1:${port}`, token: 't' }),
+        onEvent: () => undefined,
+        onStatus: (s) => statuses.push(s),
+        backoffMs: () => 60_000,
+      })
+      await new Promise((r) => setTimeout(r, 80))
+      stream.close()
+      // The once-guard means end+close collapse to a single reconnect attempt.
+      expect(statuses.filter((s) => s === 'reconnecting')).toHaveLength(1)
+    } finally {
+      server?.close()
+    }
+  })
+
+  it('does not report "open" or reset backoff on a non-2xx response', async () => {
+    let server: Server | undefined
+    try {
+      server = createServer((_req, res) => {
+        res.writeHead(503)
+        res.end('busy')
+      })
+      await new Promise<void>((r) => server?.listen(0, '127.0.0.1', () => r()))
+      const addr = server.address()
+      const port = addr && typeof addr === 'object' ? addr.port : 0
+      const statuses: StreamStatus[] = []
+      const stream = startEventStream({
+        resolveDiscovery: () => ({ endpoint: `http://127.0.0.1:${port}`, token: 't' }),
+        onEvent: () => undefined,
+        onStatus: (s) => statuses.push(s),
+        backoffMs: () => 60_000,
+      })
+      await new Promise((r) => setTimeout(r, 60))
+      stream.close()
+      expect(statuses).not.toContain('open') // a 503 is not an open stream
+      expect(statuses).toContain('reconnecting')
+    } finally {
+      server?.close()
+    }
+  })
+
   it('stops reconnecting once closed', () => {
     const h = harness(DISCOVERY)
     h.handlers?.onClose()

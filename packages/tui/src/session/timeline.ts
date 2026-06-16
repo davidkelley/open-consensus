@@ -36,6 +36,15 @@ export function emptyTimeline(runId: string): RunTimeline {
   return { runId, roundIndex: 0, agents: [], done: false, abandoned: false }
 }
 
+/**
+ * True once the live region should hand off to scrollback: the round completed,
+ * OR the run was abandoned (no orchestrator driving it). Without the abandoned
+ * case an orphaned run would hold the dynamic region forever.
+ */
+export function isTerminal(timeline: RunTimeline): boolean {
+  return timeline.done || timeline.abandoned
+}
+
 /** Apply one engine event. Events for a different run are ignored (returned as-is). */
 export function applyEvent(timeline: RunTimeline, event: EngineEvent): RunTimeline {
   if ('runId' in event && event.runId !== timeline.runId) return timeline

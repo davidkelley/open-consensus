@@ -223,6 +223,44 @@ describe('App', () => {
     await tick()
     stdin.write(CTRL_C)
     await tick(40)
-    expect(lastFrame()).toContain('cancelled run r1')
+    expect(lastFrame()).toContain('cancel requested for r1')
+  })
+
+  it('a second Ctrl+C exits after a cancel is already in flight', async () => {
+    const { stdin } = renderApp({ cancelRun: async () => new Promise(() => undefined) }) // never resolves
+    stdin.write('/run p review this')
+    await tick()
+    stdin.write('\r')
+    await tick(60)
+    emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
+    await tick()
+    stdin.write(CTRL_C) // first: cancel (does not exit)
+    await tick()
+    expect(exited).toBe(0)
+    stdin.write(CTRL_C) // second: exit even though the cancel is still pending
+    await tick()
+    expect(exited).toBe(1)
+  })
+
+  it('redacts secrets when echoing the typed line', async () => {
+    const { stdin, lastFrame } = renderApp()
+    stdin.write('here is a token sk-ant-api03-SECRETSECRETSECRET')
+    await tick()
+    stdin.write('\r')
+    await tick()
+    expect(lastFrame()).not.toContain('SECRETSECRETSECRET')
+  })
+
+  it('commits an abandoned run to scrollback (no orchestrator)', async () => {
+    const { stdin, lastFrame } = renderApp()
+    stdin.write('/run p review this')
+    await tick()
+    stdin.write('\r')
+    await tick(60)
+    emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
+    await tick()
+    emit({ type: 'run-abandoned', runId: 'r1' }, 2)
+    await tick()
+    expect(lastFrame()).toContain('(abandoned)')
   })
 })
