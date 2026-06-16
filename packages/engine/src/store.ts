@@ -8,7 +8,14 @@ import {
   type RunRecord,
   type RunState,
   computeVerdict,
+  invocationRecordSchema,
+  roundRecordSchema,
+  runRecordSchema,
 } from './model'
+
+/** Validate a record ON WRITE (D17) so a bug can never persist a malformed row;
+ * reads stay light. The schema is `passthrough`, so additive fields are kept. */
+const roundWriteSchema = roundRecordSchema.omit({ invocations: true, verdict: true })
 
 const SCHEMA_VERSION = 3
 
@@ -141,6 +148,7 @@ export class EngineStore {
   // -- writes -------------------------------------------------------------
 
   createRun(run: RunRecord): void {
+    runRecordSchema.parse(run) // validate on write (D17)
     this.db
       .prepare('INSERT INTO runs (runId, panelId, state, createdAt) VALUES (?, ?, ?, ?)')
       .run(run.runId, run.panelId, run.state, run.createdAt)
@@ -151,6 +159,7 @@ export class EngineStore {
   }
 
   startRound(round: Omit<RoundRecord, 'invocations' | 'verdict'>): void {
+    roundWriteSchema.parse(round) // validate on write (D17)
     this.db
       .prepare(
         'INSERT INTO rounds (roundId, runId, idx, prompt, quorum, state, verdict) VALUES (?, ?, ?, ?, ?, ?, NULL)',
@@ -184,6 +193,7 @@ export class EngineStore {
   }
 
   upsertInvocation(roundId: string, inv: InvocationRecord): void {
+    invocationRecordSchema.parse(inv) // validate on write (D17)
     this.db
       .prepare(`
         INSERT INTO invocations

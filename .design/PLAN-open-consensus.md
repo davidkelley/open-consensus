@@ -269,3 +269,22 @@ Then the user added four requirements (Biome, zod-everywhere, ≥90% coverage + 
 - **"SSE and long-poll are conflicting transports; pick one" (opencode, high).** Rejected as stated: they serve different consumers (request/response MCP orchestrator vs. live human TUI). Addressed the underlying concern (D11) by making both *views over one persisted event log* rather than two state machines, which removes the duplicate-state risk the finding was really about.
 - **"Use an async SQLite driver instead of better-sqlite3" (opencode, critical).** Partially rejected: keeping `better-sqlite3` but neutralizing the event-loop-blocking concern by storing only small metadata/events in SQLite and streaming raw output to disk (D9), with `node:sqlite` noted as a fallback. Revisit only if profiling shows real event-loop stalls.
 - **"Windows process behavior must be certified before Stage 4 is done" (Grok-fallback, low).** Rejected for v1 scope: Windows tree-kill (`taskkill /T /F`) is implemented but macOS/Linux are the certified targets (stated in assumptions/non-goals); Windows certification is deferred, not silently dropped.
+
+## Phase 3 — final cross-stage review (dispositions)
+
+The final whole-build review (Codex backgrounded; opencode + Gemini substantive) found plan-completeness items the per-stage reviews couldn't see. Each was verified against the code:
+
+**Applied:**
+- **D17 — persisted records validated on write.** Added zod schemas for `Run/Round/Invocation` records (the inferred TS type is now the single source of truth) and validate each record ON WRITE in the engine store, so a bug can never persist a malformed row. Reads stay light, exactly as D17 prescribes for internally-written rows ("validated on write so reads stay light").
+
+**Recorded as deferred / not-a-gap (with reasons):**
+- **D7 per-run config snapshot (opencode "critical").** Low reachability: the daemon loads config once at startup and is a per-user singleton, so config cannot drift within a session — every run in a session shares a known, fixed config (the round already snapshots `quorum`). Full per-config-change historical auditability is a deferred enhancement, not a correctness bug.
+- **D11/D16 SSE `snapshot-reset` (opencode high, Gemini low).** Moot under the implemented retention model: pruning is **whole-run** (`pruneRun` deletes a run + all its events), not a global sliding event window. A reconnecting client's viewed run either still exists (events intact, back-fill complete) or was pruned entirely (gone) — there is no "partial window" in which a timeline is silently incomplete, so the reset signal can't arise.
+- **D5/D10 `tempFile` prompt delivery.** The frozen adapter contract advertises `promptDelivery`/`ctx.promptFile` for forward-compat, but **no v1 adapter uses it** (claude/codex/mock = stdin; gemini/opencode = arg). The engine implements the delivery modes adapters actually use; temp-file delivery is a deferred capability with no current consumer.
+- **D16 disk-usage ceiling / emergency prune / reserve file.** Explicitly **optional** in the plan ("An *optional* disk-usage ceiling…"). Deferred; coordinated per-run pruning (rows + raw blobs) IS implemented.
+- **D21 multi-host `mcp install`.** The implementation IS the planned **default** ("the default targets a single canonical host; multi-host is explicit"). Aggregated multi-host summary/partial-failure is the explicit extension, not the default.
+- **D10 orphan-sweep PID identity.** A **documented Stage-5 design decision**: the detached-process-group sweep "accepts the (rare) pgid-reuse race" (see `daemon.ts`), trading start-time identity tracking for simplicity. Reaffirmed.
+- **D17 SSE event-payload deep validation.** The SSE producer is the daemon itself (trusted, internally constructed); the TUI decoder guards on `type` and drops malformed frames rather than crashing. Deep zod on every frame conflicts with D17's "reads stay light"; the untrusted boundaries (config, MCP inputs, HTTP bodies, adapter `parse`) ARE validated.
+- **D19 SSE event coalescing/throttling (Gemini low).** The per-event reducer is pure + cheap and ink batches renders; explicit throttling is a deferred perf optimization, not a correctness issue.
+
+The **Grok CLI was unavailable for the entire build** (`403 spending-limit`); every stage's review loop ran with Codex + opencode + Gemini, noted in each stage's commits.

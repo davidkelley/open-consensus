@@ -38,6 +38,16 @@ describe('EngineStore', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('validates records on write and rejects a malformed one (D17)', () => {
+    // A bug constructing a bad record can't silently persist a corrupt row.
+    expect(() => store.createRun({ ...run(), state: 'bogus' as RunRecord['state'] })).toThrow()
+    store.createRun(run())
+    expect(() => store.upsertInvocation('rd1', okInv('a', { attempts: -1 }))).toThrow()
+    expect(
+      () => startRound(store, Number.NaN), // NaN quorum is rejected before insert
+    ).toThrow()
+  })
+
   it('persists a run/round/invocation and reads them back', () => {
     store.createRun(run())
     startRound(store)
