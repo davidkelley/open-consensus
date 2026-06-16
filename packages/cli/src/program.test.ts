@@ -460,9 +460,15 @@ describe('mcp install/uninstall', () => {
 })
 
 describe('mcp-server', () => {
-  it('runs the stdio MCP server via the injected runner', async () => {
+  it('runs the stdio MCP server and does NOT launch the TUI or the daemon', async () => {
+    let daemonLaunched = false
+    deps.launchDaemon = () => {
+      daemonLaunched = true
+    }
     await run(argv('mcp-server'), deps)
-    expect(out).toContain('mcp-server-ran')
+    // Exactly the runner ran — no `tui-launched` (launchTui) and no `serve-called`.
+    expect(out).toEqual(['mcp-server-ran'])
+    expect(daemonLaunched).toBe(false)
   })
 })
 
