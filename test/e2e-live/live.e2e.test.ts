@@ -17,16 +17,28 @@ import { afterAll, describe, expect, it } from 'vitest'
  * `test/e2e-live/`, runs only via `npm run test:e2e:live` (which sets
  * OPEN_CONSENSUS_E2E_LIVE=1 — the loader-time guard in vitest.e2e-live.config.ts),
  * and is NEVER discovered by the default suite's globs. It SKIPS cleanly when no
- * real CLI is installed/authed, and caps concurrency to a single panel.
+ * real CLI is installed/authed, and caps concurrency to one invocation at a time.
  */
 
-const PROMPT = 'Reply with only the single word: ok'
+// Defence-in-depth (in addition to the config loader guard): if this file is ever
+// picked up by another runner, refuse to spend real money without the explicit flag.
+if (process.env.OPEN_CONSENSUS_E2E_LIVE !== '1') {
+  throw new Error('live-e2e requires OPEN_CONSENSUS_E2E_LIVE=1 — run via `npm run test:e2e:live`')
+}
 
-/** Probe the sandboxed real adapters; return the ids that are installed + usable. */
+const PROMPT = 'Reply with only the single word: ok'
+// The MCP SDK Client defaults to a 60s request timeout; our long-poll waits up to
+// 90s for a real agent, so requests must allow longer.
+const CALL_TIMEOUT_MS = 120_000
+
+/** Probe the SANDBOXED real adapters; return the ids that are installed + usable. */
 async function availableAdapters(registry: AdapterRegistry): Promise<string[]> {
   const ids: string[] = []
   for (const [id, adapter] of registry) {
     if (id === 'mock') continue
+    // Never include an adapter without a native sandbox, even if a custom/default
+    // registry change started returning one (D20).
+    if ((adapter as Adapter).capabilities.sandbox === false) continue
     if ((await (adapter as Adapter).detect()).available) ids.push(id)
   }
   return ids
@@ -61,7 +73,8 @@ describe('consensus live-e2e (real agents)', () => {
     const config: Config = parseConfig({
       schemaVersion: 1,
       agents: ids.map((id) => ({ id, name: id, adapter: id, maxRetries: 0, timeoutMs: 90_000 })),
-      panels: [{ id: 'live', name: 'Live', agentIds: ids, quorum: 1 }],
+      // concurrency: 1 -> never fan all real CLIs out at once (cap the live spend).
+      panels: [{ id: 'live', name: 'Live', agentIds: ids, quorum: 1, concurrency: 1 }],
     })
 
     dir = mkdtempSync(join(tmpdir(), 'oc-live-'))
@@ -79,7 +92,9 @@ describe('consensus live-e2e (real agents)', () => {
     await client.connect(clientT)
 
     const call = async (name: string, args: Record<string, unknown>) => {
-      const res = await client.callTool({ name, arguments: args })
+      const res = await client.callTool({ name, arguments: args }, undefined, {
+        timeout: CALL_TIMEOUT_MS,
+      })
       const text = (res.content as Array<{ text?: string }>).map((c) => c.text ?? '').join('')
       return JSON.parse(text) as Record<string, unknown>
     }

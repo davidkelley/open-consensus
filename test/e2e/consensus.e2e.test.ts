@@ -54,6 +54,7 @@ function makePaths(base: string): AppPaths {
 let dir: string
 let paths: AppPaths
 let daemon: RunningDaemon
+let registryUsed: AdapterRegistry
 
 /** A fresh MCP client wired to the running daemon — a "driving agent". */
 async function connectOrchestrator(): Promise<Client> {
@@ -79,8 +80,8 @@ async function call<T = Record<string, unknown>>(
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'oc-e2e-'))
   paths = makePaths(dir)
-  const registry: AdapterRegistry = new Map([['mock', createMockAdapter({ slowMs: 2000 })]])
-  daemon = await startDaemon({ adapters: registry, config, paths, loopback: true })
+  registryUsed = new Map([['mock', createMockAdapter({ slowMs: 2000 })]])
+  daemon = await startDaemon({ adapters: registryUsed, config, paths, loopback: true })
 })
 afterEach(async () => {
   await daemon.stop().catch(() => undefined)
@@ -88,6 +89,12 @@ afterEach(async () => {
 })
 
 describe('consensus e2e (mock stack)', () => {
+  it('uses ONLY the deterministic mock adapter (mechanical no-spend guarantee)', () => {
+    expect([...registryUsed.keys()]).toEqual(['mock'])
+    // The default-suite `no-live.ts` setup already hard-fails if this is '1'.
+    expect(process.env.OPEN_CONSENSUS_E2E_LIVE).not.toBe('1')
+  })
+
   it('drives start -> poll -> finalize with quorum met', async () => {
     const client = await connectOrchestrator()
     const { parsed: started } = await call<{ runId: string; roundId: string; next_action: string }>(
@@ -156,12 +163,15 @@ describe('consensus e2e (mock stack)', () => {
     expect(round.verdict).not.toBe('met')
   })
 
-  it('fetches an agent’s raw output via paginated consensus_get_raw', async () => {
+  it('pages an agent’s full raw output via consensus_get_raw (cursor + eof)', async () => {
     const client = await connectOrchestrator()
+    // A long prompt makes the mock's echoed output span several small pages, so
+    // the test exercises cursor advancement + EOF + multi-page reconstruction.
+    const prompt = `raw-${'x'.repeat(300)}`
     const { parsed: started } = await call<{ runId: string; roundId: string }>(
       client,
       'consensus_start',
-      { panel: 'all-ok', prompt: 'hello raw' },
+      { panel: 'all-ok', prompt },
     )
     const { parsed: round } = await call<{ agents: Array<{ rawRef?: string }> }>(
       client,
@@ -170,13 +180,24 @@ describe('consensus e2e (mock stack)', () => {
     )
     const rawRef = round.agents.map((a) => a.rawRef).find(Boolean)
     expect(rawRef).toBeTruthy()
-    const { parsed: page } = await call<{ chunk: string; eof: boolean; nextCursor: number }>(
-      client,
-      'consensus_get_raw',
-      { rawRef, maxBytes: 64 },
-    )
-    expect(typeof page.chunk).toBe('string')
-    expect(page.chunk.length).toBeGreaterThan(0)
+
+    let cursor = 0
+    let full = ''
+    let pages = 0
+    for (;;) {
+      const { parsed: page } = await call<{ chunk: string; eof: boolean; nextCursor: number }>(
+        client,
+        'consensus_get_raw',
+        { rawRef, cursor, maxBytes: 64 },
+      )
+      full += page.chunk
+      cursor = page.nextCursor
+      pages += 1
+      if (page.eof) break
+      expect(pages).toBeLessThan(100) // guard against a non-advancing cursor
+    }
+    expect(pages).toBeGreaterThan(1) // genuinely paginated
+    expect(full).toContain(prompt) // reconstructed output contains the echoed prompt
   })
 
   it('a restarted orchestrator re-anchors via consensus_list_runs', async () => {
@@ -215,8 +236,8 @@ describe('consensus e2e (mock stack)', () => {
     })
     await daemon.stop()
 
-    const registry: AdapterRegistry = new Map([['mock', createMockAdapter()]])
-    daemon = await startDaemon({ adapters: registry, config, paths, loopback: true })
+    registryUsed = new Map([['mock', createMockAdapter()]])
+    daemon = await startDaemon({ adapters: registryUsed, config, paths, loopback: true })
     const reconnected = await connectOrchestrator()
     const { parsed: runs } = await call<{ runs: Array<{ runId: string }> }>(
       reconnected,
@@ -224,5 +245,14 @@ describe('consensus e2e (mock stack)', () => {
       {},
     )
     expect(runs.runs.map((r) => r.runId)).toContain(started.runId)
+
+    // Re-poll the original round: its completed verdict persisted across restart.
+    const { parsed: round } = await call<{ done: boolean; verdict: string }>(
+      reconnected,
+      'consensus_poll',
+      { runId: started.runId, roundId: started.roundId, wait_ms: 5000 },
+    )
+    expect(round.done).toBe(true)
+    expect(round.verdict).toBe('met')
   })
 })

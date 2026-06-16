@@ -30,7 +30,7 @@ open-consensus panel create review --agents claude,codex,gemini --quorum 2
 open-consensus mcp install          # writes the Claude Code config (~/.claude.json)
 
 # 5a. Drive a consensus from your orchestrator via the MCP tools
-#     (consensus_start -> consensus_poll -> consensus_round/finalize), or…
+#     (consensus_start -> consensus_poll -> consensus_round; finalize = just stop), or…
 
 # 5b. …drive + watch it interactively in the TUI
 open-consensus                      # bare command launches the slash-command TUI

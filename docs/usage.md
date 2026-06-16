@@ -26,9 +26,13 @@ Tell your orchestrator to *use Open Consensus*. The loop it runs:
      `verdict`, and a `next_action` hint.
 4. Read the per-agent answers and decide:
    - `consensus_round({ runId, prompt })` to run another round (you compose the
-     next prompt — rounds are stateless), or finalize by simply stopping.
+     next prompt — rounds are stateless), or **finalize by simply stopping**
+     (there is no "finalize" tool — you just stop adding rounds).
 5. `consensus_get_raw({ rawRef, cursor?, maxBytes? })` to page the full output of
    an agent whose answer was truncated, without bloating context.
+6. `consensus_cancel({ runId })` (or `consensus_cancel_agent({ runId, roundId,
+   agentId })`) to abort an in-flight run/agent — the daemon tree-kills the child
+   so nothing keeps running server-side.
 
 Re-entry after an orchestrator restart: `consensus_list_runs({ state? })` surfaces
 in-flight + parked runs; `consensus_status({ runId })` re-adopts a parked run so
