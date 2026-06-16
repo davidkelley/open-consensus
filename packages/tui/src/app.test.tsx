@@ -173,6 +173,28 @@ describe('App', () => {
     expect(exited).toBe(0) // first Ctrl+C cancels, does not exit
   })
 
+  it('Ctrl+C during /run dispatch cancels the run once its id arrives', async () => {
+    // Hold the daemon-ensure pending so Ctrl+C lands in the dispatch window
+    // (run started on the daemon, but no id returned to the TUI yet).
+    let releaseEnsure: () => void = () => undefined
+    const { stdin } = renderApp({
+      ensureDaemon: () =>
+        new Promise<void>((r) => {
+          releaseEnsure = r
+        }),
+    })
+    stdin.write('/run p review this')
+    await tick()
+    stdin.write('\r')
+    await tick()
+    stdin.write(CTRL_C) // in the dispatch window -> remember to cancel, don't exit
+    await tick()
+    expect(exited).toBe(0)
+    releaseEnsure() // ensure resolves -> startRunCommand -> viewRun(r1) -> cancel
+    await tick(60)
+    expect(cancelled).toEqual(['r1'])
+  })
+
   it('Ctrl+C exits when idle', async () => {
     const { stdin } = renderApp()
     stdin.write(CTRL_C)

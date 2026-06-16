@@ -223,7 +223,9 @@ function httpConnect(
     const status = res.statusCode ?? 0
     const contentType = res.headers['content-type'] ?? ''
     if (status < 200 || status >= 300 || !contentType.includes('text/event-stream')) {
-      res.resume() // drain so the socket can be freed
+      // Destroy (not just resume) so a responder that holds the connection open
+      // doesn't leak a socket across each reconnect cycle.
+      res.destroy()
       closeOnce()
       return
     }

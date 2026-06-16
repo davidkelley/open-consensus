@@ -45,6 +45,10 @@ export function App(props: AppProps): ReactElement {
   const [busy, setBusy] = useState(false)
   const committed = useRef<Set<string>>(new Set())
   const cancelling = useRef(false)
+  // A `/run` is dispatching but hasn't returned its id yet.
+  const startingRun = useRef(false)
+  // A Ctrl+C arrived during that dispatch window — cancel the run once its id lands.
+  const cancelRequested = useRef(false)
 
   // Stable across renders (setLines + idRef are stable) so the completion effect
   // can list it as a dependency without re-firing every render. The id is read
@@ -53,6 +57,21 @@ export function App(props: AppProps): ReactElement {
     const id = idRef.current++
     setLines((prev) => [...prev, { id, text }])
   }, [])
+
+  // Request a server-side cancel of a run (the daemon tree-kills the child and
+  // drives the round to a terminal SSE event, which commits it to scrollback).
+  const cancelRun = useCallback(
+    (id: string): void => {
+      const cancel =
+        props.cancelRun ??
+        ((rid) => cancelRunCommand(props.discoveryPath, rid).then(() => undefined))
+      print(`cancelling run ${id}… (Ctrl+C again to quit)`)
+      cancel(id)
+        .then(() => print(`cancel requested for ${id}`))
+        .catch(() => print('cancel request failed — Ctrl+C again to quit'))
+    },
+    [props.cancelRun, props.discoveryPath, print],
+  )
 
   const { timeline, status } = useDaemonEvents({
     runId,
@@ -79,7 +98,16 @@ export function App(props: AppProps): ReactElement {
     discoveryPath: props.discoveryPath,
     print,
     ensureDaemon: props.ensureDaemon,
-    viewRun: (id) => setRunId(id),
+    viewRun: (id) => {
+      // If Ctrl+C was pressed while this run was starting, cancel it immediately
+      // instead of opening a live view that the user already asked to abort.
+      if (cancelRequested.current) {
+        cancelRequested.current = false
+        cancelRun(id)
+        return
+      }
+      setRunId(id)
+    },
     hasActiveRun: () => runId !== undefined,
     quit: () => doExit(),
   }
@@ -100,10 +128,18 @@ export function App(props: AppProps): ReactElement {
       return
     }
     setBusy(true)
+    const isRun = parsed.name === 'run'
+    if (isRun) startingRun.current = true
     command
       .run(ctx, parsed.args, parsed.rest)
       .catch((err: unknown) => print(`error: ${err instanceof Error ? err.message : String(err)}`))
-      .finally(() => setBusy(false))
+      .finally(() => {
+        setBusy(false)
+        if (isRun) {
+          startingRun.current = false
+          cancelRequested.current = false
+        }
+      })
   }
 
   useInput((input, key) => {
@@ -112,18 +148,20 @@ export function App(props: AppProps): ReactElement {
     // the first timeline — so a quick Ctrl+C cancels the run instead of exiting.
     const runActive = runId !== undefined && (timeline === undefined || !isTerminal(timeline))
     if (runActive && !cancelling.current) {
-      // First Ctrl+C with an active run: request a server-side cancel (the daemon
-      // tree-kills the child and drives the round to a terminal SSE event, which
-      // commits the run to scrollback). We deliberately do NOT clear runId here:
-      // on a failed/slow cancel the run keeps streaming so nothing is lost, and a
-      // SECOND Ctrl+C (cancelling already set) exits — two presses always quit.
+      // First Ctrl+C with an active run: request a server-side cancel. We do NOT
+      // clear runId — on a failed/slow cancel the run keeps streaming so nothing
+      // is lost, and the terminal SSE event commits it. A SECOND Ctrl+C (cancelling
+      // already set) exits, so two presses always quit.
       cancelling.current = true
-      const cancel =
-        props.cancelRun ?? ((id) => cancelRunCommand(props.discoveryPath, id).then(() => undefined))
-      print(`cancelling run ${runId}… (Ctrl+C again to quit)`)
-      cancel(runId)
-        .then(() => print(`cancel requested for ${runId}`))
-        .catch(() => print('cancel request failed — Ctrl+C again to quit'))
+      cancelRun(runId)
+      return
+    }
+    if (startingRun.current && !cancelRequested.current) {
+      // A /run is dispatching but has no id yet — remember to cancel it the moment
+      // the id arrives (viewRun), so the run isn't left orphaned on the daemon. A
+      // second Ctrl+C still exits.
+      cancelRequested.current = true
+      print('cancelling the starting run… (Ctrl+C again to quit)')
       return
     }
     doExit()
