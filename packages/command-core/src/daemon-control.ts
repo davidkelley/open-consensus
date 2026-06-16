@@ -184,6 +184,21 @@ export async function listRunsCommand(
   return parse<{ runs: RunRecord[] }>(res).runs
 }
 
+/** Cancel a run (tree-kills its in-flight children, server-side). Used by the
+ * TUI's Ctrl+C so nothing keeps running after the user aborts (D19). */
+export async function cancelRunCommand(
+  discoveryPath: string,
+  runId: string,
+): Promise<{ cancelled: number }> {
+  const d = requireDiscovery(discoveryPath)
+  const res = await daemonRequest(d.endpoint, d.token, {
+    method: 'POST',
+    path: `/runs/${encodeURIComponent(runId)}/cancel`,
+    timeoutMs: 10_000,
+  })
+  return parse(res)
+}
+
 /** List the panels the *running daemon* loaded (vs. the on-disk config). */
 export async function listDaemonPanelsCommand(discoveryPath: string): Promise<PanelSummary[]> {
   const d = requireDiscovery(discoveryPath)

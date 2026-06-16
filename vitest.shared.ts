@@ -14,15 +14,22 @@ export function packageVitestConfig(): UserConfig {
   return {
     test: {
       environment: 'node',
-      include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
+      include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'test/**/*.test.ts'],
       exclude: ['**/dist/**', '**/node_modules/**', 'test/e2e-live/**'],
       setupFiles: [resolve(repoRoot, 'test/setup/no-live.ts')],
       coverage: {
         provider: 'v8',
         reporter: ['text', 'html'],
-        include: ['src/**/*.ts'],
+        include: ['src/**/*.ts', 'src/**/*.tsx'],
         // Thin entrypoint stubs carry no logic; everything else must hit the gate.
-        exclude: ['src/**/*.test.ts', 'src/index.ts', 'src/cli.ts', 'src/mcp.ts'],
+        exclude: [
+          'src/**/*.test.ts',
+          'src/**/*.test.tsx',
+          'src/index.ts',
+          'src/cli.ts',
+          'src/mcp.ts',
+          'src/tui.tsx',
+        ],
         thresholds: { lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },

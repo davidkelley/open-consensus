@@ -101,6 +101,9 @@ beforeEach(async () => {
       out.push('serve-called')
     },
     mcpHostPath: join(dir, 'host.json'),
+    launchTui: async () => {
+      out.push('tui-launched')
+    },
     ensureAttempts: 20,
     ensureIntervalMs: 5,
   }
@@ -436,6 +439,13 @@ describe('mcp install/uninstall', () => {
     expect(JSON.parse(readFileSync(host, 'utf8')).mcpServers['oc-dev']).toBeDefined()
     await run(argv('mcp', 'uninstall', '--name', 'oc-dev', '--config', host), deps)
     expect(JSON.parse(readFileSync(host, 'utf8')).mcpServers['oc-dev']).toBeUndefined()
+  })
+})
+
+describe('default action', () => {
+  it('launches the TUI when no subcommand is given', async () => {
+    await run(argv(), deps)
+    expect(out).toContain('tui-launched')
   })
 })
 

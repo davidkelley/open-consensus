@@ -8,10 +8,12 @@ import { fileURLToPath } from 'node:url'
 import { defaultRegistry } from '@open-consensus/adapters'
 import {
   type ForegroundDaemon,
+  ensureDaemonRunning,
   runDaemonForeground,
   spawnDetachedDaemon,
 } from '@open-consensus/command-core'
 import { daemonDiscoveryPath, startDaemon } from '@open-consensus/daemon'
+import { launchTui } from '@open-consensus/tui'
 import { CommanderError } from 'commander'
 import { resolveConfigFile, run } from './program'
 
@@ -53,17 +55,36 @@ async function serveDaemon(): Promise<void> {
 }
 
 const cliEntry = fileURLToPath(import.meta.url)
+const configFile = resolveConfigFile()
+const discoveryPath = daemonDiscoveryPath()
+const launchDaemon = (): void => {
+  spawnDetachedDaemon({ command: process.execPath, args: [cliEntry, 'daemon', 'serve'] })
+}
 
 run(process.argv, {
-  configFile: resolveConfigFile(),
-  discoveryPath: daemonDiscoveryPath(),
+  configFile,
+  discoveryPath,
   registry: daemonRegistry(),
   out: (line) => console.log(line),
   err: (line) => process.stderr.write(`${line}\n`),
-  launchDaemon: () =>
-    spawnDetachedDaemon({ command: process.execPath, args: [cliEntry, 'daemon', 'serve'] }),
+  launchDaemon,
   serveDaemon,
   mcpHostPath: `${homedir()}/.claude.json`,
+  // Launch the interactive TUI on a bare `open-consensus`, wiring the same
+  // daemon auto-start (with the config-path guard) the one-shot commands use.
+  launchTui: () =>
+    launchTui({
+      configFile,
+      discoveryPath,
+      registry: daemonRegistry(),
+      ensureDaemon: async () => {
+        await ensureDaemonRunning({
+          discoveryPath,
+          launch: launchDaemon,
+          expectedConfigPath: configFile,
+        })
+      },
+    }),
 }).catch((err: unknown) => {
   if (err instanceof CommanderError) {
     process.exitCode = err.exitCode

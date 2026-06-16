@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   DaemonNotRunningError,
   DaemonRpcError,
+  cancelRunCommand,
   daemonStatusCommand,
   ensureDaemonRunning,
   listDaemonPanelsCommand,
@@ -60,6 +61,7 @@ function startFakeServer(): Promise<void> {
       return send(200, { runs: [{ runId: 'r1', panelId: 'p', state: 'running', createdAt: 0 }] })
     }
     if (req.method === 'POST' && url === '/runs') return send(200, { runId: 'r1', roundId: 'rd1' })
+    if (req.method === 'POST' && url === '/runs/r1/cancel') return send(200, { cancelled: 2 })
     if (req.method === 'GET' && url === '/runs/r1/status') {
       return send(200, {
         run: { runId: 'r1', panelId: 'p', state: 'running', createdAt: 0 },
@@ -128,6 +130,11 @@ describe('daemon RPC', () => {
     await expect(listRunsCommand(discoveryPath, 'bogus' as unknown as 'running')).rejects.toThrow(
       /invalid run state/,
     )
+  })
+
+  it('cancelRunCommand posts a cancel and returns the count', async () => {
+    writeDiscovery({})
+    expect(await cancelRunCommand(discoveryPath, 'r1')).toEqual({ cancelled: 2 })
   })
 
   it('throws DaemonRpcError on a non-2xx JSON response', async () => {

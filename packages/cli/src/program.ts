@@ -55,6 +55,8 @@ export interface CliDeps {
   serveDaemon: () => Promise<void>
   /** Default host-config path for `mcp install` (e.g. `~/.claude.json`). */
   mcpHostPath: string
+  /** Launch the interactive TUI (run when `open-consensus` is given no subcommand). */
+  launchTui: () => Promise<void>
   /** Readiness poll knobs (tests shrink these). */
   ensureAttempts?: number
   ensureIntervalMs?: number
@@ -115,6 +117,10 @@ export function buildProgram(deps: CliDeps): Command {
     .name('open-consensus')
     .description('Open Consensus — manage agents, panels, the daemon, and consensus runs')
     .exitOverride()
+    // No subcommand -> launch the interactive slash-command TUI (D19).
+    .action(async () => {
+      await deps.launchTui()
+    })
 
   buildAgentCommands(program, deps, ctx)
   buildPanelCommands(program, deps, ctx)
