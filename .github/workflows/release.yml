@@ -4,12 +4,15 @@ on:
   push:
     tags: ['v*']
 
+# Least privilege by default; only the final `release` job escalates to write.
 permissions:
-  contents: write # create the GitHub Release + upload assets
+  contents: read
 
 jobs:
   build:
     name: build ${{ matrix.triple }}
+    permissions:
+      contents: read # checkout + upload-artifact only; no Release write here
     strategy:
       fail-fast: false
       matrix:
@@ -23,23 +26,29 @@ jobs:
           - { triple: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.pkg-cache
-          key: pkg-cache-${{ matrix.triple }}-node22
+          key: pkg-cache-${{ matrix.triple }}-node22-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - run: npm run build:binary -- --target ${{ matrix.triple }}
+      # The runner is the target arch, so the binary runs here: smoke before ship.
+      - run: npm run smoke:binary
       # macOS: ad-hoc sign so Gatekeeper accepts the binary once the installer
       # clears com.apple.quarantine (D-PKG6; Developer-ID notarization deferred).
+      # Ad-hoc signatures are embedded in the binary (not xattrs), so the later
+      # `cp` + `tar` preserve them.
       - name: Ad-hoc codesign (macOS)
         if: runner.os == 'macOS'
         run: codesign --force --sign - "dist-bin/open-consensus-${{ matrix.triple }}"
       - name: Package tarball + per-target checksum
+        env:
+          COPYFILE_DISABLE: '1' # keep macOS ._ resource forks out of the tarball
         run: |
           set -euo pipefail
           # The tarball is named with the triple (the download-URL contract,
@@ -47,8 +56,13 @@ jobs:
           # extracts + installs.
           cp "dist-bin/open-consensus-${{ matrix.triple }}" open-consensus
           tar -czf "open-consensus-${{ matrix.triple }}.tar.gz" open-consensus
-          shasum -a 256 "open-consensus-${{ matrix.triple }}.tar.gz" > "SHA256SUMS.${{ matrix.triple }}"
-      - uses: actions/upload-artifact@v4
+          # sha256sum (GNU coreutils) on Linux, shasum (perl) on macOS — same format.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "open-consensus-${{ matrix.triple }}.tar.gz" > "SHA256SUMS.${{ matrix.triple }}"
+          else
+            shasum -a 256 "open-consensus-${{ matrix.triple }}.tar.gz" > "SHA256SUMS.${{ matrix.triple }}"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist-${{ matrix.triple }}
           path: |
@@ -60,21 +74,30 @@ jobs:
     name: publish GitHub Release
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write # ONLY this job writes the Release
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
-      - name: Assemble assets + merged SHA256SUMS
+      - name: Assemble assets + verify merged SHA256SUMS
         run: |
           set -euo pipefail
           mkdir -p out
           find artifacts -name 'open-consensus-*.tar.gz' -exec cp {} out/ \;
+          count=$(find out -name 'open-consensus-*.tar.gz' | wc -l | tr -d ' ')
+          if [ "$count" -ne 4 ]; then
+            echo "expected 4 target tarballs, found $count" >&2
+            exit 1
+          fi
           # Concatenate the per-target checksum files into ONE SHA256SUMS in a
           # single job — avoids the concurrent-upload race a shared file would hit.
-          cat artifacts/*/SHA256SUMS.* | sort -k2 > out/SHA256SUMS
+          cat artifacts/*/SHA256SUMS.* > out/SHA256SUMS
           echo '=== SHA256SUMS ==='
           cat out/SHA256SUMS
-      - uses: softprops/action-gh-release@v2
+          # Verify every asset against the merged file BEFORE publishing.
+          (cd out && sha256sum -c SHA256SUMS)
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             out/*.tar.gz

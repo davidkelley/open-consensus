@@ -24,7 +24,7 @@
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "smoke:pack": "npm run build && node scripts/smoke-pack.mjs",
     "test:e2e:live": "npm run build && OPEN_CONSENSUS_E2E_LIVE=1 vitest run --config vitest.e2e-live.config.ts",
-    "build:binary": "npm run build && node scripts/build-binary.mjs",
+    "build:binary": "node scripts/build-binary.mjs",
     "smoke:binary": "node scripts/smoke-binary.mjs"
   },
   "devDependencies": {

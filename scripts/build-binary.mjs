@@ -5,22 +5,34 @@
 // ESM from its snapshot (Node's ESM loader bypasses pkg's CJS fs patch); SEA mode
 // dispatches the ESM entry natively and supports top-level await.
 //
-// Two steps:
-//   1. esbuild bundles the ESM CLI entry into ONE file, INLINING the lazy TUI/MCP
+// Self-contained: it runs the workspace build itself, so `--target` reaches THIS
+// script directly (no fragile `&&` arg-forwarding through an npm script). Steps:
+//   1. turbo build the workspace dist.
+//   2. esbuild bundles the ESM CLI entry into ONE file, INLINING the lazy TUI/MCP
 //      dynamic imports (yoga-layout's top-level await stays deferred inside the
 //      lazily-initialized TUI module) and EXTERNALIZING native `better-sqlite3`,
 //      which is shipped as a resolvable node_modules asset instead.
-//   2. pkg (sea:true) wraps the bundle + better-sqlite3 into a per-target binary.
+//   3. pkg (sea:true) wraps the bundle + better-sqlite3 into a per-target binary.
 //
 // Usage: node scripts/build-binary.mjs [--target <rust-triple>]  (default: host).
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { createRequire } from 'node:module'
 import { arch as osArch, platform as osPlatform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const require = createRequire(import.meta.url)
 
 // Rust-style triple (D-PKG11) -> @yao-pkg/pkg target token. The triple is the
 // single shared asset-name contract with the installer's install.sh.
@@ -64,6 +76,10 @@ const stagePkgJson = join(stageDir, 'package.json')
 const outBin = join(outDir, `open-consensus-${triple}`)
 
 console.log(`[build-binary] target=${triple} (pkg ${pkgTarget}, SEA mode)`)
+
+console.log('[build-binary] building the workspace (turbo)…')
+execFileSync('npm', ['run', 'build'], { stdio: 'inherit', cwd: root })
+
 rmSync(stageDir, { recursive: true, force: true })
 mkdirSync(join(stageDir, 'node_modules'), { recursive: true })
 
@@ -87,20 +103,24 @@ await build({
   logLevel: 'info',
 })
 
-// Ship better-sqlite3 as a real node_modules package next to the bundle so the
-// embedded Node resolves the bare `import 'better-sqlite3'` from the SEA VFS.
+// Stage better-sqlite3 (+ its native loader deps) as a real node_modules package
+// so the embedded Node resolves the bare `import 'better-sqlite3'` from the SEA VFS.
+// Resolve it via require.resolve from the package that depends on it, so a non-
+// hoisted layout (npm workspaces don't guarantee root hoisting) still works.
+const bs3Src = dirname(
+  require.resolve('better-sqlite3/package.json', { paths: [join(root, 'packages/engine'), root] }),
+)
 console.log('[build-binary] staging better-sqlite3 (native addon) into node_modules…')
-cpSync(join(root, 'node_modules/better-sqlite3'), join(stageDir, 'node_modules/better-sqlite3'), {
+cpSync(bs3Src, join(stageDir, 'node_modules/better-sqlite3'), {
   recursive: true,
   dereference: true,
 })
-// better-sqlite3 needs its runtime deps (bindings, etc.) — copy the small ones.
 for (const dep of ['bindings', 'file-uri-to-path']) {
-  const src = join(root, 'node_modules', dep)
   try {
-    cpSync(src, join(stageDir, 'node_modules', dep), { recursive: true, dereference: true })
+    const depSrc = dirname(require.resolve(`${dep}/package.json`, { paths: [bs3Src, root] }))
+    cpSync(depSrc, join(stageDir, 'node_modules', dep), { recursive: true, dereference: true })
   } catch {
-    /* optional dep not present */
+    /* not required by this better-sqlite3 version's loader */
   }
 }
 
@@ -119,7 +139,7 @@ console.log(
 execFileSync(
   process.execPath,
   [
-    join(root, 'node_modules/prebuild-install/bin.js'),
+    require.resolve('prebuild-install/bin.js', { paths: [bs3Src, root] }),
     '--runtime',
     'node',
     '--target',
@@ -139,13 +159,15 @@ if (!existsSync(stagedNode)) {
   )
 }
 
-// The SEA-mode project manifest (type:module + ESM bin + sea:true).
+// The SEA-mode project manifest (type:module + ESM bin + sea:true). Version is read
+// from the root package.json so the embedded metadata matches the release.
+const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
 writeFileSync(
   stagePkgJson,
   `${JSON.stringify(
     {
       name: 'open-consensus',
-      version: '0.0.0',
+      version,
       type: 'module',
       bin: 'app.mjs',
       pkg: {
