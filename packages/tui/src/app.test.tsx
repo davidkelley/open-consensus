@@ -12,6 +12,18 @@ import type { EventStream, EventStreamDeps } from './session/sse'
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms))
 const CTRL_C = '\x03'
 
+// Poll until `check()` holds (or the budget is spent), so assertions that depend
+// on async work (the ensureDaemon+startRun RPC, streamed SSE frames, the cancel
+// RPC) don't race a fixed sleep on a slow CI runner — they returned instantly
+// locally but flaked on linux. Returns as soon as the condition is true, so the
+// generous ceiling (~3s) only bites when the runner is genuinely slow. Always
+// pair with the original expect() so a real failure still shows a legible diff.
+const waitUntil = async (check: () => boolean, tries = 200): Promise<void> => {
+  for (let i = 0; i < tries && !check(); i++) await tick(15)
+}
+const waitForFrame = (lastFrame: () => string | undefined, needle: string): Promise<void> =>
+  waitUntil(() => (lastFrame() ?? '').includes(needle))
+
 let dir: string
 let server: Server
 let endpoint: string
@@ -106,7 +118,7 @@ describe('App', () => {
     stdin.write('/help')
     await tick()
     stdin.write('\r')
-    await tick()
+    await waitForFrame(lastFrame, 'start a consensus run')
     expect(lastFrame()).toContain('› /help') // echoed
     expect(lastFrame()).toContain('start a consensus run') // /run summary printed
   })
@@ -116,7 +128,7 @@ describe('App', () => {
     stdin.write('/nope')
     await tick()
     stdin.write('\r')
-    await tick()
+    await waitForFrame(lastFrame, "unknown command '/nope'")
     expect(lastFrame()).toContain("unknown command '/nope'")
   })
 
@@ -125,7 +137,7 @@ describe('App', () => {
     stdin.write('hello')
     await tick()
     stdin.write('\r')
-    await tick()
+    await waitForFrame(lastFrame, 'not a command')
     expect(lastFrame()).toContain('not a command')
   })
 
@@ -134,12 +146,13 @@ describe('App', () => {
     stdin.write('/run p review this')
     await tick()
     stdin.write('\r')
-    await tick(60) // ensureDaemon + startRunCommand RPC
+    // ensureDaemon + startRunCommand RPC; wait for both the frame and the wired stream.
+    await waitUntil(() => (lastFrame() ?? '').includes('started run r1') && streamDeps !== undefined)
     expect(lastFrame()).toContain('started run r1')
     expect(streamDeps).toBeDefined()
 
     emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
-    await tick()
+    await waitForFrame(lastFrame, 'a: pending')
     expect(lastFrame()).toContain('a: pending')
 
     emit(
@@ -154,21 +167,21 @@ describe('App', () => {
       2,
     )
     emit({ type: 'round-completed', runId: 'r1', roundId: 'rd1', verdict: 'met' }, 3)
-    await tick()
+    await waitForFrame(lastFrame, 'met')
     // Committed to the scrollback with the final verdict.
     expect(lastFrame()).toContain('met')
   })
 
   it('Ctrl+C cancels an active run server-side', async () => {
-    const { stdin } = renderApp()
+    const { stdin, lastFrame } = renderApp()
     stdin.write('/run p review this')
     await tick()
     stdin.write('\r')
-    await tick(60)
+    await waitUntil(() => streamDeps !== undefined) // RPC done, stream wired
     emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
-    await tick()
+    await waitForFrame(lastFrame, 'a: pending') // run is active before we Ctrl+C
     stdin.write(CTRL_C)
-    await tick()
+    await waitUntil(() => cancelled.length > 0)
     expect(cancelled).toEqual(['r1'])
     expect(exited).toBe(0) // first Ctrl+C cancels, does not exit
   })
@@ -177,28 +190,30 @@ describe('App', () => {
     // Hold the daemon-ensure pending so Ctrl+C lands in the dispatch window
     // (run started on the daemon, but no id returned to the TUI yet).
     let releaseEnsure: () => void = () => undefined
+    let ensureEntered = false
     const { stdin } = renderApp({
       ensureDaemon: () =>
         new Promise<void>((r) => {
+          ensureEntered = true
           releaseEnsure = r
         }),
     })
     stdin.write('/run p review this')
     await tick()
     stdin.write('\r')
-    await tick()
+    await waitUntil(() => ensureEntered) // dispatch reached the held ensureDaemon (window open)
     stdin.write(CTRL_C) // in the dispatch window -> remember to cancel, don't exit
     await tick()
     expect(exited).toBe(0)
     releaseEnsure() // ensure resolves -> startRunCommand -> viewRun(r1) -> cancel
-    await tick(60)
+    await waitUntil(() => cancelled.length > 0)
     expect(cancelled).toEqual(['r1'])
   })
 
   it('Ctrl+C exits when idle', async () => {
     const { stdin } = renderApp()
     stdin.write(CTRL_C)
-    await tick()
+    await waitUntil(() => exited === 1)
     expect(exited).toBe(1)
   })
 
@@ -219,7 +234,8 @@ describe('App', () => {
     stdin.write('/run p review this')
     await tick()
     stdin.write('\r')
-    await tick(120) // RPC + SSE connect + stream the two frames
+    // RPC + SSE connect + stream the two frames
+    await waitForFrame(lastFrame, 'met')
     expect(lastFrame()).toContain('met') // round-completed streamed + committed
   })
 
@@ -240,27 +256,27 @@ describe('App', () => {
     stdin.write('/run p review this')
     await tick()
     stdin.write('\r')
-    await tick(60)
+    await waitUntil(() => streamDeps !== undefined)
     emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
-    await tick()
+    await waitForFrame(lastFrame, 'a: pending')
     stdin.write(CTRL_C)
-    await tick(40)
+    await waitForFrame(lastFrame, 'cancel requested for r1')
     expect(lastFrame()).toContain('cancel requested for r1')
   })
 
   it('a second Ctrl+C exits after a cancel is already in flight', async () => {
-    const { stdin } = renderApp({ cancelRun: async () => new Promise(() => undefined) }) // never resolves
+    const { stdin, lastFrame } = renderApp({ cancelRun: async () => new Promise(() => undefined) }) // never resolves
     stdin.write('/run p review this')
     await tick()
     stdin.write('\r')
-    await tick(60)
+    await waitUntil(() => streamDeps !== undefined)
     emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
-    await tick()
+    await waitForFrame(lastFrame, 'a: pending')
     stdin.write(CTRL_C) // first: cancel (does not exit)
-    await tick()
+    await waitForFrame(lastFrame, 'cancel requested for r1')
     expect(exited).toBe(0)
     stdin.write(CTRL_C) // second: exit even though the cancel is still pending
-    await tick()
+    await waitUntil(() => exited === 1)
     expect(exited).toBe(1)
   })
 
@@ -269,7 +285,7 @@ describe('App', () => {
     stdin.write('here is a token sk-ant-api03-SECRETSECRETSECRET')
     await tick()
     stdin.write('\r')
-    await tick()
+    await waitForFrame(lastFrame, 'here is a token') // the (redacted) echo rendered
     expect(lastFrame()).not.toContain('SECRETSECRETSECRET')
   })
 
@@ -278,11 +294,11 @@ describe('App', () => {
     stdin.write('/run p review this')
     await tick()
     stdin.write('\r')
-    await tick(60)
+    await waitUntil(() => streamDeps !== undefined)
     emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
-    await tick()
+    await waitForFrame(lastFrame, 'a: pending')
     emit({ type: 'run-abandoned', runId: 'r1' }, 2)
-    await tick()
+    await waitForFrame(lastFrame, '(abandoned)')
     expect(lastFrame()).toContain('(abandoned)')
   })
 })
