@@ -147,7 +147,9 @@ describe('App', () => {
     await tick()
     stdin.write('\r')
     // ensureDaemon + startRunCommand RPC; wait for both the frame and the wired stream.
-    await waitUntil(() => (lastFrame() ?? '').includes('started run r1') && streamDeps !== undefined)
+    await waitUntil(
+      () => (lastFrame() ?? '').includes('started run r1') && streamDeps !== undefined,
+    )
     expect(lastFrame()).toContain('started run r1')
     expect(streamDeps).toBeDefined()
 
