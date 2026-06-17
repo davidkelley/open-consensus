@@ -26,7 +26,8 @@ details — checksums, the macOS Gatekeeper note, uninstall, supported platforms
 in [docs/distribution.md](docs/distribution.md).
 
 To build **from source** instead (for development; needs **Node ≥ 22** for the
-ink + React TUI): `npm install && npm run build`.
+ink + React TUI): clone the repo, then `npm install && npm run build` — full steps
+in [docs/distribution.md](docs/distribution.md#build-from-source).
 
 ### Drive a consensus
 

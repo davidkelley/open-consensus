@@ -35,6 +35,9 @@ the script without executing it.
 # Pin a version and install to a user dir:
 OPEN_CONSENSUS_VERSION=0.1.0 OPEN_CONSENSUS_INSTALL_DIR="$HOME/.local/bin" \
   sh -c "$(curl -fsSL https://openconsensus.dev/install)"
+
+# Or pin directly in the URL (the worker templates the version into the script):
+curl -fsSL "https://openconsensus.dev/install?version=0.1.0" | sh
 ```
 
 If the chosen directory isn't on your `PATH`, the script prints a note (common on
@@ -51,14 +54,16 @@ directly.
 | Linux arm64 | `open-consensus-aarch64-unknown-linux-gnu.tar.gz` |
 
 **Windows is a non-goal** (uncertified): the process tree-kill and `0600` file
-permissions the daemon relies on are unverified there. Use WSL, or build from source.
+permissions the daemon relies on are unverified there. Use WSL — building from source
+on native Windows does not lift that uncertified status.
 
 ## macOS Gatekeeper
 
 The binary is **ad-hoc signed**, not Apple Developer-ID notarized. The install
 script clears the `com.apple.quarantine` flag so the binary runs from the terminal
 without an "unidentified developer" prompt. If you move/redownload the binary by
-other means and macOS blocks it, clear it manually:
+other means and macOS blocks it, clear it manually (use the binary's real path — the
+`$(command -v …)` form below only works once the install dir is on your `PATH`):
 
 ```sh
 xattr -d com.apple.quarantine "$(command -v open-consensus)"
@@ -72,9 +77,13 @@ improvement.
 Every release publishes a `SHA256SUMS` file. To check an asset by hand:
 
 ```sh
-shasum -a 256 -c SHA256SUMS    # macOS
-sha256sum -c SHA256SUMS        # Linux
+shasum -a 256 --ignore-missing -c SHA256SUMS    # macOS
+sha256sum --ignore-missing -c SHA256SUMS        # Linux
 ```
+
+`SHA256SUMS` covers all four platform assets, so `--ignore-missing` skips the ones
+you didn't download (without it you'll see harmless `FAILED open or read` lines for
+them — only your asset's `OK` matters).
 
 The checksum protects **integrity** (corruption, TLS-MITM) — the trust chain is
 GitHub + Cloudflare TLS plus GitHub account security. There is **no** out-of-band
@@ -98,11 +107,12 @@ recorded path.
 
 ```sh
 open-consensus mcp uninstall                 # remove the MCP host entry
-rm -f "$(command -v open-consensus)"         # remove the binary
+rm -f "$(command -v open-consensus)"         # remove the binary (use your name if
+                                             # you set OPEN_CONSENSUS_BIN_NAME)
 rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/open-consensus" \
        "${XDG_CONFIG_HOME:-$HOME/.config}/open-consensus" \
        "${XDG_DATA_HOME:-$HOME/.local/share}/open-consensus" \
-       "${XDG_CACHE_HOME:-$HOME/.cache}/open-consensus"   # remove config + state
+       "${XDG_CACHE_HOME:-$HOME/.cache}/open-consensus"   # config, state, data, cache
 ```
 
 ## Build from source
