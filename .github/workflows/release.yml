@@ -91,6 +91,7 @@ jobs:
     permissions:
       contents: write # ONLY this job writes the Release
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 # for install.sh
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
@@ -99,6 +100,9 @@ jobs:
           set -euo pipefail
           mkdir -p out
           find artifacts -name 'open-consensus-*.tar.gz' -exec cp {} out/ \;
+          # The curl-installer script ships AS a release asset (no hosted infra):
+          # `…/releases/latest/download/install.sh`.
+          cp install.sh out/
           count=$(find out -name 'open-consensus-*.tar.gz' | wc -l | tr -d ' ')
           if [ "$count" -ne 4 ]; then
             echo "expected 4 target tarballs, found $count" >&2
@@ -116,4 +120,5 @@ jobs:
           files: |
             out/*.tar.gz
             out/SHA256SUMS
+            out/install.sh
           fail_on_unmatched_files: true

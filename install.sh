@@ -1,10 +1,11 @@
 #!/bin/sh
-# Open Consensus installer.
-#   curl -fsSL https://openconsensus.dev/install | sh
+# Open Consensus installer. Published as a GitHub Release asset (no hosted infra):
+#   curl -fsSL https://github.com/davidkelley/open-consensus/releases/latest/download/install.sh | sh
 #
 # Downloads the latest (or a pinned) release binary, VERIFIES its SHA-256 against
-# the release's SHA256SUMS, and installs it. POSIX sh (no bashisms) for max
-# portability under `curl | sh`. macOS + Linux only — Windows is a non-goal.
+# the release's SHA256SUMS, and installs it. Pin a version with the
+# OPEN_CONSENSUS_VERSION env var. POSIX sh (no bashisms) for max portability under
+# `curl | sh`. macOS + Linux only — Windows is a non-goal.
 set -eu
 
 OWNER="davidkelley"

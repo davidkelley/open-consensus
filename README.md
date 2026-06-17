@@ -16,14 +16,15 @@ terminal timeline, through a claude-code-style slash-command CLI/TUI.
 ### Install
 
 ```sh
-curl -fsSL https://openconsensus.dev/install | sh
+curl -fsSL https://github.com/davidkelley/open-consensus/releases/latest/download/install.sh | sh
 ```
 
 Downloads a **self-contained binary** (no Node required) for macOS / Linux,
 verifies its SHA-256, and installs `open-consensus` to `/usr/local/bin` (falling
-back to `~/.local/bin`). Pin a version with `OPEN_CONSENSUS_VERSION=0.1.0`. Full
-details — checksums, the macOS Gatekeeper note, uninstall, supported platforms —
-in [docs/distribution.md](docs/distribution.md).
+back to `~/.local/bin`). Pin a version with `OPEN_CONSENSUS_VERSION=0.1.0`. The
+installer script and binaries are plain **GitHub Release assets** — no hosted
+infrastructure. Full details — checksums, the macOS Gatekeeper note, uninstall,
+supported platforms — in [docs/distribution.md](docs/distribution.md).
 
 To build **from source** instead (for development; needs **Node ≥ 22** for the
 ink + React TUI): clone the repo, then `npm install && npm run build` — full steps

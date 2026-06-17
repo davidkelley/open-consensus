@@ -42,10 +42,10 @@ The initial vertical slice — built stage-by-stage, each cleared by a multi-age
 - **Packaging & distribution** — a self-contained single binary (`@yao-pkg/pkg`
   enhanced-SEA mode) for macOS/Linux arm64+x64, built + smoked in a tag-triggered
   GitHub Release matrix on native-arch runners (ad-hoc-signed on macOS, with a
-  merged checksum-verified `SHA256SUMS`); a Cloudflare-Worker `curl | sh` installer
-  on `openconsensus.dev` (SHA-256 verified, macOS-quarantine-clearing,
-  version-pinnable). One binary multiplexes the CLI/TUI/daemon **and** the MCP
-  server via
+  merged checksum-verified `SHA256SUMS`); a `curl | sh` installer published as a
+  GitHub Release asset — no hosted infrastructure (SHA-256 verified,
+  macOS-quarantine-clearing, version-pinnable via `OPEN_CONSENSUS_VERSION`). One
+  binary multiplexes the CLI/TUI/daemon **and** the MCP server via
   `open-consensus mcp-server`. See [docs/distribution.md](docs/distribution.md).
 
 ### Notes

@@ -7,11 +7,11 @@ can also build from source for development.
 ## Install (curl)
 
 ```sh
-curl -fsSL https://openconsensus.dev/install | sh
+curl -fsSL https://github.com/davidkelley/open-consensus/releases/latest/download/install.sh | sh
 ```
 
-This script (served from `openconsensus.dev`, source in
-[`apps/installer/install.sh`](../apps/installer/install.sh)):
+The script is itself a **GitHub Release asset** (`install.sh`, source at
+[`install.sh`](../install.sh)) — no hosted infrastructure or custom domain. It:
 
 1. detects your OS + architecture and the matching release asset,
 2. downloads `open-consensus-<target>.tar.gz` and `SHA256SUMS` from the GitHub
@@ -20,8 +20,8 @@ This script (served from `openconsensus.dev`, source in
 4. installs the `open-consensus` binary to `/usr/local/bin` (falling back to
    `~/.local/bin` if that isn't writable).
 
-Prefer to read before you run? `curl -fsSL https://openconsensus.dev/install` prints
-the script without executing it.
+Prefer to read before you run? `curl -fsSL https://github.com/davidkelley/open-consensus/releases/latest/download/install.sh`
+prints the script without executing it.
 
 ### Knobs (environment variables)
 
@@ -34,10 +34,10 @@ the script without executing it.
 ```sh
 # Pin a version and install to a user dir:
 OPEN_CONSENSUS_VERSION=0.1.0 OPEN_CONSENSUS_INSTALL_DIR="$HOME/.local/bin" \
-  sh -c "$(curl -fsSL https://openconsensus.dev/install)"
+  sh -c "$(curl -fsSL https://github.com/davidkelley/open-consensus/releases/latest/download/install.sh)"
 
-# Or pin directly in the URL (the worker templates the version into the script):
-curl -fsSL "https://openconsensus.dev/install?version=0.1.0" | sh
+# Or fetch a specific release's installer directly:
+curl -fsSL https://github.com/davidkelley/open-consensus/releases/download/v0.1.0/install.sh | sh
 ```
 
 If the chosen directory isn't on your `PATH`, the script prints a note (common on
@@ -86,9 +86,10 @@ you didn't download (without it you'll see harmless `FAILED open or read` lines 
 them — only your asset's `OK` matters).
 
 The checksum protects **integrity** (corruption, TLS-MITM) — the trust chain is
-GitHub + Cloudflare TLS plus GitHub account security. There is **no** out-of-band
-cryptographic signature yet (cosign / minisign / SLSA provenance is a documented
-future hardening), so `curl … | sh` carries the usual trust assumptions.
+GitHub's TLS plus GitHub account security (the script and the binaries are all
+GitHub Release assets). There is **no** out-of-band cryptographic signature yet
+(cosign / minisign / SLSA provenance is a documented future hardening), so
+`curl … | sh` carries the usual trust assumptions.
 
 ## MCP registration
 
@@ -126,6 +127,7 @@ node packages/cli/dist/cli.js --help  # or `npm link` to put `open-consensus` on
 ```
 
 Build the single binary locally with `npm run build:binary` (host target) and
-smoke it with `npm run smoke:binary`. See
-[`apps/installer/README.md`](../apps/installer/README.md) for the worker behind
-`openconsensus.dev/install`.
+smoke it with `npm run smoke:binary`. The installer script
+([`install.sh`](../install.sh)) and the binaries are published as GitHub Release
+assets by [`.github/workflows/release.yml`](../.github/workflows/release.yml) on a
+`v*` tag.
