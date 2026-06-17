@@ -32,12 +32,10 @@ prints the script without executing it.
 | `OPEN_CONSENSUS_BIN_NAME` | Installed binary name (default `open-consensus`). |
 
 ```sh
-# Pin a version and install to a user dir:
+# Pin a version and install to a user dir (always set OPEN_CONSENSUS_VERSION to pin
+# the BINARY — fetching a versioned install.sh URL alone does not):
 OPEN_CONSENSUS_VERSION=0.1.0 OPEN_CONSENSUS_INSTALL_DIR="$HOME/.local/bin" \
   sh -c "$(curl -fsSL https://github.com/davidkelley/open-consensus/releases/latest/download/install.sh)"
-
-# Or fetch a specific release's installer directly:
-curl -fsSL https://github.com/davidkelley/open-consensus/releases/download/v0.1.0/install.sh | sh
 ```
 
 If the chosen directory isn't on your `PATH`, the script prints a note (common on

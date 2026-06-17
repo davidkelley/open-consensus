@@ -95,8 +95,7 @@ TARGET="$(detect_target)"
 VERSION="${OPEN_CONSENSUS_VERSION:-latest}"
 if [ "$VERSION" != "latest" ]; then
   # Validate before it ever reaches a URL or the shell — a value with `/`, `;`,
-  # `$(…)` etc. must be rejected, not normalized (the worker validates `?version`
-  # the same way, but a user's own env var bypasses the worker).
+  # `$(…)` etc. must be rejected, not normalized.
   if ! printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
     err "invalid OPEN_CONSENSUS_VERSION '$VERSION' (expected e.g. 0.1.0 or v0.1.0)"
   fi
@@ -122,8 +121,8 @@ download "$BASE_URL/$SUMS" "$TMP/$SUMS"
 
 # Verify integrity against the release checksum BEFORE extracting/installing —
 # fail-closed: an empty/missing expected checksum aborts. This is INTEGRITY against
-# corruption/TLS-MITM only; the trust anchor is GitHub + Cloudflare TLS + the
-# GitHub account, NOT an out-of-band signature (cosign/minisign is future work).
+# corruption/TLS-MITM only; the trust anchor is GitHub TLS + the GitHub account,
+# NOT an out-of-band signature (cosign/minisign is future work).
 # Assumes the GNU `sha256sum` / `shasum -a 256` line format (`<hash>  <file>`) the
 # release CI emits; tolerate the optional `*` (binary-mode) prefix on the filename.
 expected="$(awk -v a="$ASSET" '{f=$2; sub(/^\*/, "", f)} f == a {print $1}' "$TMP/$SUMS")"

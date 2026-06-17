@@ -31,7 +31,7 @@ jobs:
       - run: npm run test # vitest, per-package >=90% coverage gate (no real CLIs, no spend)
       - run: npm run test:e2e # mock-stack MCP -> daemon -> engine (no spend)
       - run: npm run smoke:pack # pack the npm tarballs + install into a clean prefix
-      - run: npx --yes shellcheck install.sh # the curl-installer script (released as an asset)
+      - run: shellcheck install.sh # the curl-installer script (released as an asset; shellcheck is preinstalled on the runner)
 
   binary:
     name: build + smoke the single binary (linux-x64)
