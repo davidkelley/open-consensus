@@ -39,8 +39,16 @@ The initial vertical slice — built stage-by-stage, each cleared by a multi-age
 - **Tests** — per-package vitest with a ≥90% line/branch/function coverage gate,
   a mock-stack E2E (`npm run test:e2e`), and an isolated opt-in live-E2E
   (`npm run test:e2e:live`) — the documented final release quality-gate.
+- **Packaging & distribution** — a self-contained single binary (`@yao-pkg/pkg`
+  enhanced-SEA mode) for macOS/Linux arm64+x64, built + smoked in a tag-triggered
+  GitHub Release matrix on native-arch runners (ad-hoc-signed on macOS, with a
+  merged checksum-verified `SHA256SUMS`); a Cloudflare-Worker `curl | sh` installer
+  on `openconsensus.dev` (SHA-256 verified, macOS-quarantine-clearing, version-
+  pinnable). One binary multiplexes the CLI/TUI/daemon **and** the MCP server via
+  `open-consensus mcp-server`. See [docs/distribution.md](docs/distribution.md).
 
 ### Notes
 
-- Requires **Node ≥ 22**. macOS/Linux certified; Windows experimental.
+- Requires **Node ≥ 22** from source (the binary bundles its own runtime).
+  macOS/Linux certified; Windows experimental.
 - Read-only execution is best-effort, **not** a sandbox (see the README).

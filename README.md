@@ -13,26 +13,38 @@ terminal timeline, through a claude-code-style slash-command CLI/TUI.
 
 ## Quickstart
 
-Requires **Node ≥ 22** (the ink + React TUI needs it; `.nvmrc` pins 24).
+### Install
 
 ```sh
-# 1. Install + build (until published, from a clone)
-npm install && npm run build
+curl -fsSL https://openconsensus.dev/install | sh
+```
 
-# 2. First run: auto-detect installed agent CLIs and seed a default panel
+Downloads a **self-contained binary** (no Node required) for macOS / Linux,
+verifies its SHA-256, and installs `open-consensus` to `/usr/local/bin` (falling
+back to `~/.local/bin`). Pin a version with `OPEN_CONSENSUS_VERSION=0.1.0`. Full
+details — checksums, the macOS Gatekeeper note, uninstall, supported platforms —
+in [docs/distribution.md](docs/distribution.md).
+
+To build **from source** instead (for development; needs **Node ≥ 22** for the
+ink + React TUI): `npm install && npm run build`.
+
+### Drive a consensus
+
+```sh
+# 1. First run: auto-detect installed agent CLIs and seed a default panel
 open-consensus init                 # add --allow-unsandboxed to include opencode
 
-# 3. Inspect / adjust your roster
+# 2. Inspect / adjust your roster
 open-consensus agent list
 open-consensus panel create review --agents claude,codex,gemini --quorum 2
 
-# 4. Register the MCP server so your orchestrator can call it
+# 3. Register the MCP server so your orchestrator can call it
 open-consensus mcp install          # writes the Claude Code config (~/.claude.json)
 
-# 5a. Drive a consensus from your orchestrator via the MCP tools
+# 4a. Drive a consensus from your orchestrator via the MCP tools
 #     (consensus_start -> consensus_poll -> consensus_round; finalize = just stop), or…
 
-# 5b. …drive + watch it interactively in the TUI
+# 4b. …drive + watch it interactively in the TUI
 open-consensus                      # bare command launches the slash-command TUI
 #   › /run review "Critique this plan: …"
 ```
@@ -47,6 +59,7 @@ Tell your orchestrator to "use Open Consensus" — see [docs/usage.md](docs/usag
 
 | Doc | What |
 | --- | --- |
+| [distribution.md](docs/distribution.md) | Install (curl one-liner), versions, checksums, uninstall, platforms |
 | [usage.md](docs/usage.md) | Driving a consensus (MCP loop + the TUI) |
 | [configuration.md](docs/configuration.md) | Agents, panels, the config file, env |
 | [cli.md](docs/cli.md) | The `open-consensus` command surface |

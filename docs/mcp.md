@@ -79,8 +79,15 @@ command = "open-consensus-mcp"
 ```
 
 Then tell the orchestrator to "use Open Consensus" for multi-agent review/consensus
-tasks. `open-consensus mcp install` (Stage 8) writes these entries safely and
-idempotently.
+tasks. `open-consensus mcp install` writes these entries safely and idempotently —
+**prefer it** over hand-editing, because it records the right command for how you
+installed:
+
+- **Single binary** (curl install): the binary self-registers by its absolute path
+  as `{ "command": "/usr/local/bin/open-consensus", "args": ["mcp-server"] }` (the
+  host may not share your shell `PATH`, so an absolute path is used). If you move the
+  binary, re-run `mcp install` to refresh the path.
+- **From source**: the published `open-consensus-mcp` stdio bin, as shown above.
 
 > If the daemon isn't running, the tools return a clear, actionable error
 > (`daemon is not running — start it with open-consensus daemon start`) rather
