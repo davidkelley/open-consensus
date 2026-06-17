@@ -134,7 +134,10 @@ describe('runProcess', () => {
   })
 
   it('tree-kills a stubborn child and its grandchild', async () => {
-    const r = await run('stubborn', { timeoutMs: 200 })
+    // Generous timeout so even a cold CI runner reliably starts node + spawns the
+    // grandchild + flushes `grandchild:<pid>` BEFORE the timeout tree-kills it
+    // (200ms was too tight on a slow linux runner — the write raced the kill).
+    const r = await run('stubborn', { timeoutMs: 2000 })
     expect(r.outcome).toBe('timeout')
     const match = r.stdout.match(/grandchild:(\d+)/)
     expect(match).toBeTruthy()
