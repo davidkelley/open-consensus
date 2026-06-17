@@ -9,7 +9,7 @@
 //   - `init --detect-only` (adapters load + detect; mock NOT exercised)
 // All against an ISOLATED XDG/config sandbox so it never touches the user's daemon.
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { arch as osArch, platform as osPlatform, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,16 +33,25 @@ const bin =
 const sandbox = mkdtempSync(join(tmpdir(), 'oc-smoke-bin-'))
 const configPath = join(sandbox, 'config.json')
 writeFileSync(configPath, JSON.stringify({ schemaVersion: 1, agents: [], panels: [] }))
-// Isolate every path so the smoke daemon can't collide with the user's.
+const sandboxHome = join(sandbox, 'home')
+const sandboxTmp = join(sandbox, 'tmp')
+mkdirSync(sandboxHome, { recursive: true })
+mkdirSync(sandboxTmp, { recursive: true })
+// Isolate EVERY path so the smoke daemon can't collide with (or leak into) the
+// user's real daemon — incl. HOME/TMPDIR (any XDG fallback resolves through them).
 const env = {
   ...process.env,
   OPEN_CONSENSUS_CONFIG: configPath,
+  HOME: sandboxHome,
+  TMPDIR: sandboxTmp,
   XDG_CONFIG_HOME: join(sandbox, 'config'),
   XDG_STATE_HOME: join(sandbox, 'state'),
   XDG_DATA_HOME: join(sandbox, 'data'),
   XDG_CACHE_HOME: join(sandbox, 'cache'),
   XDG_RUNTIME_DIR: join(sandbox, 'run'),
 }
+// Don't let a CI-set OPEN_CONSENSUS_DAEMON_LOG redirect the smoke daemon's stdio.
+Reflect.deleteProperty(env, 'OPEN_CONSENSUS_DAEMON_LOG')
 
 const log = (m) => console.log(`[smoke-binary] ${m}`)
 const fail = (m) => {

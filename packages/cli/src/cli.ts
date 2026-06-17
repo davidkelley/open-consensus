@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { defaultRegistry } from '@open-consensus/adapters'
 import {
   type ForegroundDaemon,
-  daemonSpawnArgs,
+  daemonLaunchSpec,
   defaultMcpEntry,
   ensureDaemonRunning,
   runDaemonForeground,
@@ -56,28 +56,15 @@ async function serveDaemon(): Promise<void> {
   })
 }
 
-// `import.meta.url` is a real file path from source, but a virtual `/snapshot/...`
-// path inside a packaged binary — so the daemon self-spawn drops it when packaged
-// (the binary re-execs itself via `process.execPath`; see `daemonSpawnArgs`).
+// `import.meta.url` is a real file path from source (used for the from-source
+// daemon re-exec); inside a packaged binary the daemon re-execs the binary itself
+// via a shell-interposed clean execve — see `daemonLaunchSpec`.
 const cliEntry = fileURLToPath(import.meta.url)
 const packaged = isPackaged()
 const configFile = resolveConfigFile()
 const discoveryPath = daemonDiscoveryPath()
 const launchDaemon = (): void => {
-  if (packaged) {
-    // In a packaged single binary the daemon is a re-exec of THIS binary. A direct
-    // `spawn(process.execPath, ['daemon','serve'])` goes through pkg's patched
-    // child_process, which mangles a binary-spawns-itself call (the re-exec'd
-    // process loses the subcommand). Interpose `/bin/sh -c 'exec "$0" …'` so the
-    // daemon is launched by a clean `execve`, bypassing the patched spawn. `$0` is
-    // our own binary path (no user input), so there is no shell-injection surface.
-    spawnDetachedDaemon({
-      command: '/bin/sh',
-      args: ['-c', 'exec "$0" daemon serve', process.execPath],
-    })
-    return
-  }
-  spawnDetachedDaemon({ command: process.execPath, args: daemonSpawnArgs({ packaged, cliEntry }) })
+  spawnDetachedDaemon(daemonLaunchSpec({ packaged, execPath: process.execPath, cliEntry }))
 }
 
 // Top-level await (not a floating `.then/.catch`): the packaged SEA dispatcher

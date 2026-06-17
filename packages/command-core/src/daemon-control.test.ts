@@ -8,7 +8,7 @@ import {
   DaemonNotRunningError,
   DaemonRpcError,
   cancelRunCommand,
-  daemonSpawnArgs,
+  daemonLaunchSpec,
   daemonStatusCommand,
   ensureDaemonRunning,
   listDaemonPanelsCommand,
@@ -339,20 +339,31 @@ describe('spawnDetachedDaemon', () => {
   })
 })
 
-describe('daemonSpawnArgs', () => {
-  it('drops the cliEntry when packaged (the binary re-execs itself via execPath)', () => {
-    expect(daemonSpawnArgs({ packaged: true, cliEntry: '/snapshot/app/cli.js' })).toEqual([
-      'daemon',
-      'serve',
-    ])
+describe('daemonLaunchSpec', () => {
+  it('shell-interposes a clean execve when packaged (bypasses pkg patched spawn)', () => {
+    expect(
+      daemonLaunchSpec({
+        packaged: true,
+        execPath: '/usr/local/bin/oc',
+        cliEntry: '/snapshot/cli',
+      }),
+    ).toEqual({
+      command: '/bin/sh',
+      args: ['-c', 'exec "$0" daemon serve', '/usr/local/bin/oc'],
+    })
   })
 
-  it('passes the cliEntry from source (node <cliEntry> daemon serve)', () => {
-    expect(daemonSpawnArgs({ packaged: false, cliEntry: '/abs/dist/cli.js' })).toEqual([
-      '/abs/dist/cli.js',
-      'daemon',
-      'serve',
-    ])
+  it('re-execs node <cliEntry> daemon serve from source', () => {
+    expect(
+      daemonLaunchSpec({
+        packaged: false,
+        execPath: '/usr/bin/node',
+        cliEntry: '/abs/dist/cli.js',
+      }),
+    ).toEqual({
+      command: '/usr/bin/node',
+      args: ['/abs/dist/cli.js', 'daemon', 'serve'],
+    })
   })
 })
 

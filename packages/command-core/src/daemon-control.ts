@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import { openSync, realpathSync } from 'node:fs'
+import { closeSync, openSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   type DaemonResponse,
@@ -233,14 +233,25 @@ export interface DaemonLauncher {
 export function spawnDetachedDaemon(launcher: DaemonLauncher): ChildProcess {
   // The detached daemon's stdio is normally discarded; OPEN_CONSENSUS_DAEMON_LOG
   // redirects it to a file so an auto-start failure (which the foreground caller
-  // never sees) is diagnosable.
+  // never sees) is diagnosable. A bad path falls back to discarding (never crashes
+  // the launch over a diagnostic).
   const logPath = process.env.OPEN_CONSENSUS_DAEMON_LOG
-  const fd = logPath ? openSync(logPath, 'a') : undefined
+  let fd: number | undefined
+  if (logPath) {
+    try {
+      fd = openSync(logPath, 'a')
+    } catch {
+      fd = undefined
+    }
+  }
   const child = spawn(launcher.command, launcher.args, {
     detached: true,
     stdio: fd !== undefined ? ['ignore', fd, fd] : 'ignore',
     env: { ...process.env, ...launcher.env },
   })
+  // The child inherited (dup'd) the fd; close the parent's copy so a long-lived
+  // caller (the TUI) doesn't leak it.
+  if (fd !== undefined) closeSync(fd)
   // A detached child emits 'error' asynchronously if the executable can't be
   // spawned (e.g. ENOENT). Swallow it here so it isn't an unhandled exception in
   // the parent — the real failure surfaces as `ensureDaemonRunning` timing out.
@@ -250,14 +261,27 @@ export function spawnDetachedDaemon(launcher: DaemonLauncher): ChildProcess {
 }
 
 /**
- * Args to (re)spawn THIS process as the foreground daemon (`daemon serve`). In a
- * packaged single binary the executable IS the binary (`process.execPath`) and the
- * subcommand alone is enough — there is no on-disk script to pass (`import.meta.url`
- * resolves to a virtual `/snapshot/...` path that does not exist). From source we
- * pass the resolved CLI entry file so `node <cliEntry> daemon serve` runs.
+ * The {@link DaemonLauncher} to re-exec THIS process as a detached foreground
+ * daemon (`daemon serve`).
+ *
+ * - From source: `node <cliEntry> daemon serve`.
+ * - Packaged single binary: the daemon IS this binary, but a direct
+ *   `spawn(execPath, ['daemon','serve'])` goes through pkg's patched
+ *   child_process, which mangles a binary-spawns-itself call (the re-exec'd
+ *   process loses its subcommand). Interpose `/bin/sh -c 'exec "$0" daemon serve'`
+ *   so the daemon is launched by a clean `execve` that bypasses the patched spawn.
+ *   `$0` is `execPath` passed as a SEPARATE argv (never interpolated into the `-c`
+ *   string), so a path with shell metacharacters is safe.
  */
-export function daemonSpawnArgs(opts: { packaged: boolean; cliEntry: string }): string[] {
-  return opts.packaged ? ['daemon', 'serve'] : [opts.cliEntry, 'daemon', 'serve']
+export function daemonLaunchSpec(opts: {
+  packaged: boolean
+  execPath: string
+  cliEntry: string
+}): DaemonLauncher {
+  if (opts.packaged) {
+    return { command: '/bin/sh', args: ['-c', 'exec "$0" daemon serve', opts.execPath] }
+  }
+  return { command: opts.execPath, args: [opts.cliEntry, 'daemon', 'serve'] }
 }
 
 export interface EnsureDaemonDeps {

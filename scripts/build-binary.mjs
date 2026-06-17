@@ -14,7 +14,7 @@
 //
 // Usage: node scripts/build-binary.mjs [--target <rust-triple>]  (default: host).
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { arch as osArch, platform as osPlatform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -106,7 +106,12 @@ for (const dep of ['bindings', 'file-uri-to-path']) {
 
 // Replace the staged addon with one built for the TARGET's Node 22 ABI (the build
 // machine's Node may differ — e.g. Node 24 -> ABI 137 vs the SEA binary's 127).
-// prebuild-install fetches better-sqlite3's published prebuilt addon by ABI+arch.
+// Delete the build-machine-native .node FIRST so a failed/partial prebuild fetch
+// can never silently ship the wrong-ABI addon: prebuild-install must produce a
+// fresh one, and we assert it exists below.
+const bs3Dir = join(stageDir, 'node_modules/better-sqlite3')
+const stagedNode = join(bs3Dir, 'build/Release/better_sqlite3.node')
+rmSync(join(bs3Dir, 'build'), { recursive: true, force: true })
 const { platform: tgtPlatform, arch: tgtArch } = TARGET_OS[triple]
 console.log(
   `[build-binary] fetching better-sqlite3 node22 prebuild (${tgtPlatform}-${tgtArch}, ABI 127)…`,
@@ -126,8 +131,13 @@ execFileSync(
     '--tag-prefix',
     'v',
   ],
-  { stdio: 'inherit', cwd: join(stageDir, 'node_modules/better-sqlite3') },
+  { stdio: 'inherit', cwd: bs3Dir },
 )
+if (!existsSync(stagedNode)) {
+  throw new Error(
+    `prebuild-install did not produce ${stagedNode} for node22 ${tgtPlatform}-${tgtArch}; the binary would ship without (or with a wrong-ABI) better-sqlite3 addon.`,
+  )
+}
 
 // The SEA-mode project manifest (type:module + ESM bin + sea:true).
 writeFileSync(
@@ -140,7 +150,10 @@ writeFileSync(
       bin: 'app.mjs',
       pkg: {
         sea: true,
-        assets: ['node_modules/better-sqlite3/**/*'],
+        // Embed the WHOLE staged node_modules (better-sqlite3 + its `bindings` /
+        // `file-uri-to-path` deps) so the bare `import 'better-sqlite3'` and its
+        // transitive requires resolve from the SEA VFS on every target.
+        assets: ['node_modules/**/*'],
       },
     },
     null,
