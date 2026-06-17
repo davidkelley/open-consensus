@@ -16,8 +16,12 @@ curl -fsSL https://openconsensus.dev/install | sh
   does. A pinned install: `…/install?version=0.1.0` (or `OPEN_CONSENSUS_VERSION=0.1.0`
   in the user's env).
 - The script **verifies the SHA-256** of the asset against the release's `SHA256SUMS`
-  before installing (D-PKG10). Trust anchor is GitHub + Cloudflare TLS (not a
-  signature; cosign/SLSA is a future hardening).
+  before installing (D-PKG10), fail-closed. This is **integrity** against corruption
+  / TLS-MITM, **not provenance**: both files come from the same release, so the trust
+  chain is GitHub + Cloudflare TLS + GitHub account security — there is no out-of-band
+  signature (cosign / minisign / SLSA is a documented future hardening).
+- `OPEN_CONSENSUS_VERSION` (and the `?version=` query) are validated as a semver
+  before reaching any URL or the shell.
 - macOS: it clears `com.apple.quarantine` on the temp file and re-ad-hoc-signs so
   Gatekeeper accepts the ad-hoc-signed binary (D-PKG6).
 

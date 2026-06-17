@@ -50,11 +50,11 @@ detect_target() {
 }
 
 download() {
-  # download <url> <dest>
+  # download <url> <dest> — bounded so a hung connection can't hang the installer.
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$1" -o "$2"
+    curl -fsSL --connect-timeout 30 --max-time 600 "$1" -o "$2"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$2" "$1"
+    wget -q --timeout=600 -O "$2" "$1"
   else
     err "need 'curl' or 'wget' to download release artifacts"
   fi
@@ -92,8 +92,14 @@ choose_install_dir() {
 TARGET="$(detect_target)"
 
 VERSION="${OPEN_CONSENSUS_VERSION:-latest}"
-if [ "$VERSION" != "latest" ] && [ "${VERSION#v}" = "$VERSION" ]; then
-  VERSION="v$VERSION"
+if [ "$VERSION" != "latest" ]; then
+  # Validate before it ever reaches a URL or the shell — a value with `/`, `;`,
+  # `$(…)` etc. must be rejected, not normalized (the worker validates `?version`
+  # the same way, but a user's own env var bypasses the worker).
+  if ! printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+    err "invalid OPEN_CONSENSUS_VERSION '$VERSION' (expected e.g. 0.1.0 or v0.1.0)"
+  fi
+  [ "${VERSION#v}" != "$VERSION" ] || VERSION="v$VERSION"
 fi
 if [ "$VERSION" = "latest" ]; then
   BASE_URL="https://github.com/$OWNER/$REPO/releases/latest/download"
@@ -113,9 +119,12 @@ echo "Fetching:        $BASE_URL/$ASSET"
 download "$BASE_URL/$ASSET" "$TMP/$ASSET"
 download "$BASE_URL/$SUMS" "$TMP/$SUMS"
 
-# Verify integrity against the release checksum BEFORE extracting/installing.
-# (Trust anchor: the GitHub + Cloudflare TLS that served these — not a signature.)
-expected="$(awk -v a="$ASSET" '$2 == a {print $1}' "$TMP/$SUMS")"
+# Verify integrity against the release checksum BEFORE extracting/installing —
+# fail-closed: an empty/missing expected checksum aborts. This is INTEGRITY against
+# corruption/TLS-MITM only; the trust anchor is GitHub + Cloudflare TLS + the
+# GitHub account, NOT an out-of-band signature (cosign/minisign is future work).
+# Tolerate the optional `*` (binary-mode) prefix some sha256sum outputs use.
+expected="$(awk -v a="$ASSET" '{f=$2; sub(/^\*/, "", f)} f == a {print $1}' "$TMP/$SUMS")"
 [ -n "$expected" ] || err "no checksum for $ASSET in $SUMS"
 actual="$(sha256_of "$TMP/$ASSET")"
 if [ "$expected" != "$actual" ]; then
@@ -124,18 +133,20 @@ fi
 echo "Checksum OK:     $actual"
 
 need_cmd tar
-tar -xzf "$TMP/$ASSET" -C "$TMP"
+# Extract ONLY the expected binary — a (checksum-valid but) hostile tarball can't
+# drop extra files via this path.
+tar -xzf "$TMP/$ASSET" -C "$TMP" "$BIN_DEFAULT"
 BIN_PATH="$TMP/$BIN_DEFAULT"
 [ -f "$BIN_PATH" ] || err "binary '$BIN_DEFAULT' not found in $ASSET"
 chmod 0755 "$BIN_PATH"
 
 # macOS: clear the quarantine flag on the TEMP file (before it ever lands at the
-# install path, so Finder never sees a quarantined binary) and re-ad-hoc-sign, so
-# Gatekeeper accepts our ad-hoc-signed binary (D-PKG6).
-if [ "$(uname -s)" = "Darwin" ]; then
-  xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
-  command -v codesign >/dev/null 2>&1 && codesign --force --sign - "$BIN_PATH" 2>/dev/null || true
-fi
+# install path, so Finder never sees a quarantined binary). No re-sign needed — the
+# binary is already ad-hoc-signed in CI and the embedded Mach-O signature survives
+# tar/cp (D-PKG6).
+case "$TARGET" in
+  *apple-darwin*) xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true ;;
+esac
 
 DEST_DIR="$(choose_install_dir)"
 INSTALL_NAME="${OPEN_CONSENSUS_BIN_NAME:-$BIN_DEFAULT}"

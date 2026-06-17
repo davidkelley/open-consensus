@@ -52,3 +52,20 @@ jobs:
       - run: npm ci
       - run: npm run build:binary -- --target x86_64-unknown-linux-gnu
       - run: npm run smoke:binary # daemon start/status/stop (native SQLite) + mcp-server + mcp install
+
+  installer:
+    name: installer worker + shellcheck (apps/installer)
+    runs-on: ubuntu-24.04
+    # The installer is an isolated sub-project (its own Cloudflare/wrangler/vitest@3
+    # stack); run its checks here so it can't bit-rot outside the monorepo gate.
+    defaults:
+      run:
+        working-directory: apps/installer
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test # vitest (Cloudflare Workers pool)
+      - run: npx --yes shellcheck install.sh

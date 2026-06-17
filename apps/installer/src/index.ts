@@ -38,7 +38,9 @@ export default {
     return new Response(request.method === 'HEAD' ? null : body, {
       headers: {
         'content-type': 'text/x-shellscript; charset=utf-8',
-        'cache-control': 'public, max-age=300',
+        // Short TTL: the install endpoint is security-sensitive, so a rolled-back
+        // script propagates quickly (a new CLI release needs no script change).
+        'cache-control': 'public, max-age=60',
       },
     })
   },

@@ -41,6 +41,12 @@ describe('installer worker', () => {
     expect(res.status).toBe(400)
   })
 
+  it('contains the version-template marker exactly once (so ?version templating is total)', async () => {
+    const body = await (await SELF.fetch('https://openconsensus.dev/install')).text()
+    const count = body.split('${OPEN_CONSENSUS_VERSION:-latest}').length - 1
+    expect(count).toBe(1)
+  })
+
   it('404s an unknown path and 405s a non-GET method', async () => {
     expect((await SELF.fetch('https://openconsensus.dev/other')).status).toBe(404)
     expect(
