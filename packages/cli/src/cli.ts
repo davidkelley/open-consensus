@@ -64,48 +64,67 @@ const packaged = isPackaged()
 const configFile = resolveConfigFile()
 const discoveryPath = daemonDiscoveryPath()
 const launchDaemon = (): void => {
+  if (packaged) {
+    // In a packaged single binary the daemon is a re-exec of THIS binary. A direct
+    // `spawn(process.execPath, ['daemon','serve'])` goes through pkg's patched
+    // child_process, which mangles a binary-spawns-itself call (the re-exec'd
+    // process loses the subcommand). Interpose `/bin/sh -c 'exec "$0" …'` so the
+    // daemon is launched by a clean `execve`, bypassing the patched spawn. `$0` is
+    // our own binary path (no user input), so there is no shell-injection surface.
+    spawnDetachedDaemon({
+      command: '/bin/sh',
+      args: ['-c', 'exec "$0" daemon serve', process.execPath],
+    })
+    return
+  }
   spawnDetachedDaemon({ command: process.execPath, args: daemonSpawnArgs({ packaged, cliEntry }) })
 }
 
-run(process.argv, {
-  configFile,
-  discoveryPath,
-  registry: daemonRegistry(),
-  out: (line) => console.log(line),
-  err: (line) => process.stderr.write(`${line}\n`),
-  launchDaemon,
-  serveDaemon,
-  mcpHostPath: `${homedir()}/.claude.json`,
-  // The stdio MCP server, lazily imported so one-shot commands never load the MCP
-  // SDK. `mcp install` registers this via `<binary> mcp-server` when packaged.
-  runMcpServer: async () => {
-    const { runMcpStdioServer } = await import('@open-consensus/mcp')
-    await runMcpStdioServer()
-  },
-  defaultMcpEntry: defaultMcpEntry({ packaged, execPath: process.execPath }),
-  // Launch the interactive TUI on a bare `open-consensus`, wiring the same daemon
-  // auto-start (with the config-path guard) the one-shot commands use. The TUI
-  // (ink/React) is imported lazily so one-shot commands never load it.
-  launchTui: async () => {
-    const { launchTui } = await import('@open-consensus/tui')
-    await launchTui({
-      configFile,
-      discoveryPath,
-      registry: daemonRegistry(),
-      ensureDaemon: async () => {
-        await ensureDaemonRunning({
-          discoveryPath,
-          launch: launchDaemon,
-          expectedConfigPath: configFile,
-        })
-      },
-    })
-  },
-}).catch((err: unknown) => {
+// Top-level await (not a floating `.then/.catch`): the packaged SEA dispatcher
+// only keeps the event loop alive for the AWAITED entry promise, so a floating
+// promise's later ticks (e.g. the daemon-start readiness poll) would be dropped
+// and the process would exit early. ESM + SEA enhanced mode both support this.
+try {
+  await run(process.argv, {
+    configFile,
+    discoveryPath,
+    registry: daemonRegistry(),
+    out: (line) => console.log(line),
+    err: (line) => process.stderr.write(`${line}\n`),
+    launchDaemon,
+    serveDaemon,
+    mcpHostPath: `${homedir()}/.claude.json`,
+    // The stdio MCP server, lazily imported so one-shot commands never load the MCP
+    // SDK. `mcp install` registers this via `<binary> mcp-server` when packaged.
+    runMcpServer: async () => {
+      const { runMcpStdioServer } = await import('@open-consensus/mcp')
+      await runMcpStdioServer()
+    },
+    defaultMcpEntry: defaultMcpEntry({ packaged, execPath: process.execPath }),
+    // Launch the interactive TUI on a bare `open-consensus`, wiring the same daemon
+    // auto-start (with the config-path guard) the one-shot commands use. The TUI
+    // (ink/React) is imported lazily so one-shot commands never load it.
+    launchTui: async () => {
+      const { launchTui } = await import('@open-consensus/tui')
+      await launchTui({
+        configFile,
+        discoveryPath,
+        registry: daemonRegistry(),
+        ensureDaemon: async () => {
+          await ensureDaemonRunning({
+            discoveryPath,
+            launch: launchDaemon,
+            expectedConfigPath: configFile,
+          })
+        },
+      })
+    },
+  })
+} catch (err: unknown) {
   if (err instanceof CommanderError) {
     process.exitCode = err.exitCode
-    return
+  } else {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
+    process.exitCode = 1
   }
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
-  process.exitCode = 1
-})
+}

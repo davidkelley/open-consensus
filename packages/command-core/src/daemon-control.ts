@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import { realpathSync } from 'node:fs'
+import { openSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   type DaemonResponse,
@@ -62,9 +62,13 @@ function requireDiscovery(discoveryPath: string): Discovery {
 }
 
 function delay(ms: number): Promise<void> {
+  // NOT unref'd: this backs the readiness/stop poll loops, which are an ACTIVE
+  // wait — the timer must keep the event loop alive until the awaited condition
+  // resolves. (From source other handles happen to keep the loop alive, but a
+  // packaged single binary has none, so an unref'd timer let the process exit
+  // after one poll iteration — the daemon auto-start then never confirmed.)
   return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms)
-    if (typeof t.unref === 'function') t.unref()
+    setTimeout(resolve, ms)
   })
 }
 
@@ -227,9 +231,14 @@ export interface DaemonLauncher {
  * exit immediately while the daemon keeps running.
  */
 export function spawnDetachedDaemon(launcher: DaemonLauncher): ChildProcess {
+  // The detached daemon's stdio is normally discarded; OPEN_CONSENSUS_DAEMON_LOG
+  // redirects it to a file so an auto-start failure (which the foreground caller
+  // never sees) is diagnosable.
+  const logPath = process.env.OPEN_CONSENSUS_DAEMON_LOG
+  const fd = logPath ? openSync(logPath, 'a') : undefined
   const child = spawn(launcher.command, launcher.args, {
     detached: true,
-    stdio: 'ignore',
+    stdio: fd !== undefined ? ['ignore', fd, fd] : 'ignore',
     env: { ...process.env, ...launcher.env },
   })
   // A detached child emits 'error' asynchronously if the executable can't be

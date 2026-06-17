@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { type Server, createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -317,6 +317,25 @@ describe('spawnDetachedDaemon', () => {
     const child = spawnDetachedDaemon({ command: process.execPath, args: ['-e', ''] })
     expect(typeof child.pid).toBe('number')
     child.on('error', () => {}) // ignore — the no-op child exits immediately
+  })
+
+  it('redirects the detached child stdio to OPEN_CONSENSUS_DAEMON_LOG when set', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-dlog-'))
+    const logPath = join(dir, 'd.log')
+    const prev = process.env.OPEN_CONSENSUS_DAEMON_LOG
+    process.env.OPEN_CONSENSUS_DAEMON_LOG = logPath
+    try {
+      const child = spawnDetachedDaemon({
+        command: process.execPath,
+        args: ['-e', 'process.stdout.write("hello-daemon-log")'],
+      })
+      await new Promise((resolve) => child.on('exit', resolve))
+      expect(readFileSync(logPath, 'utf8')).toContain('hello-daemon-log')
+    } finally {
+      if (prev === undefined) Reflect.deleteProperty(process.env, 'OPEN_CONSENSUS_DAEMON_LOG')
+      else process.env.OPEN_CONSENSUS_DAEMON_LOG = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

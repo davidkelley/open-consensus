@@ -10,7 +10,9 @@
     "node": ">=22"
   },
   "packageManager": "npm@11.11.0",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck && tsc --noEmit -p tsconfig.test.json",
@@ -21,13 +23,17 @@
     "format:check": "biome format .",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "smoke:pack": "npm run build && node scripts/smoke-pack.mjs",
-    "test:e2e:live": "npm run build && OPEN_CONSENSUS_E2E_LIVE=1 vitest run --config vitest.e2e-live.config.ts"
+    "test:e2e:live": "npm run build && OPEN_CONSENSUS_E2E_LIVE=1 vitest run --config vitest.e2e-live.config.ts",
+    "build:binary": "npm run build && node scripts/build-binary.mjs",
+    "smoke:binary": "node scripts/smoke-binary.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
     "@types/node": "^22.10.2",
     "@types/proper-lockfile": "^4.1.4",
     "@vitest/coverage-v8": "^2.1.8",
+    "@yao-pkg/pkg": "^6.20.0",
+    "esbuild": "^0.28.1",
     "eslint": "^9.17.0",
     "tsup": "^8.3.5",
     "turbo": "^2.9.18",
