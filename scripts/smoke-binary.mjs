@@ -75,6 +75,19 @@ try {
   const detect = oc(['init', '--detect-only'])
   log(`init --detect-only OK (${detect.trim().split('\n').length} adapters reported)`)
 
+  // 2b. agent test dry-run: add an agent and preview its invocation (no --live ->
+  //     no spawn, no spend). Exercises the config store + the adapter
+  //     buildInvocation path inside the binary.
+  oc(['agent', 'add', 'claude', '--adapter', 'claude'])
+  const agentTest = oc(['agent', 'test', 'claude'])
+  if (!/would run:/.test(agentTest))
+    fail(`agent test did not preview an invocation: ${agentTest.trim()}`)
+  log('agent test OK (dry-run invocation preview, no spawn)')
+
+  // NOTE: the interactive TUI (ink/yoga/React) render path is NOT smoked here — it
+  // needs a PTY. Manual check: run `open-consensus`, confirm the slash-command
+  // prompt renders, then Ctrl+C exits cleanly. (Verified during the Stage-2 spike.)
+
   // 3. daemon start -> status (R1: self-spawn + native SQLite + socket in the binary)
   const started = oc(['daemon', 'start'])
   if (!/daemon running on/.test(started)) fail(`daemon start unexpected output: ${started.trim()}`)

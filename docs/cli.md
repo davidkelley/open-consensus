@@ -86,7 +86,14 @@ open-consensus mcp install                 # register in the Claude Code config 
 open-consensus mcp install --config <path> --name <serverName>
 open-consensus mcp install --force         # overwrite a conflicting existing entry
 open-consensus mcp uninstall
+open-consensus mcp-server                  # run the stdio MCP server (what mcp install registers)
 ```
+
+`mcp install` registers the right command for **how you installed**: a packaged
+single binary self-registers its absolute path as `{command: <binary>, args:
+["mcp-server"]}` (the host may not share your `PATH`); a from-source/npm install
+registers the published `open-consensus-mcp` bin. `mcp-server` is the stdio MCP
+server subcommand the host launches — you don't normally run it by hand.
 
 `mcp install` is **safe and idempotent**: it parses the host config first,
 reports a byte-identical entry as `unchanged`, refuses to overwrite a *different*

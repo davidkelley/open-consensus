@@ -43,8 +43,9 @@ The initial vertical slice — built stage-by-stage, each cleared by a multi-age
   enhanced-SEA mode) for macOS/Linux arm64+x64, built + smoked in a tag-triggered
   GitHub Release matrix on native-arch runners (ad-hoc-signed on macOS, with a
   merged checksum-verified `SHA256SUMS`); a Cloudflare-Worker `curl | sh` installer
-  on `openconsensus.dev` (SHA-256 verified, macOS-quarantine-clearing, version-
-  pinnable). One binary multiplexes the CLI/TUI/daemon **and** the MCP server via
+  on `openconsensus.dev` (SHA-256 verified, macOS-quarantine-clearing,
+  version-pinnable). One binary multiplexes the CLI/TUI/daemon **and** the MCP
+  server via
   `open-consensus mcp-server`. See [docs/distribution.md](docs/distribution.md).
 
 ### Notes

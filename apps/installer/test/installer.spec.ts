@@ -15,10 +15,14 @@ describe('installer worker', () => {
     expect(body).toContain('${OPEN_CONSENSUS_VERSION:-latest}')
   })
 
-  it('serves at the root path too', async () => {
-    const res = await SELF.fetch('https://openconsensus.dev/')
+  it('tolerates a trailing slash on /install', async () => {
+    const res = await SELF.fetch('https://openconsensus.dev/install/')
     expect(res.status).toBe(200)
     expect(await res.text()).toContain('REPO="open-consensus"')
+  })
+
+  it('does NOT serve the bare root path (reserved for a future landing page)', async () => {
+    expect((await SELF.fetch('https://openconsensus.dev/')).status).toBe(404)
   })
 
   it('templates an explicit ?version pin into the script default', async () => {
@@ -49,8 +53,8 @@ describe('installer worker', () => {
 
   it('404s an unknown path and 405s a non-GET method', async () => {
     expect((await SELF.fetch('https://openconsensus.dev/other')).status).toBe(404)
-    expect(
-      (await SELF.fetch('https://openconsensus.dev/install', { method: 'POST' })).status,
-    ).toBe(405)
+    expect((await SELF.fetch('https://openconsensus.dev/install', { method: 'POST' })).status).toBe(
+      405,
+    )
   })
 })

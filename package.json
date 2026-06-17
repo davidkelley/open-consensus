@@ -10,9 +10,7 @@
     "node": ">=22"
   },
   "packageManager": "npm@11.11.0",
-  "workspaces": [
-    "packages/*"
-  ],
+  "workspaces": ["packages/*"],
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck && tsc --noEmit -p tsconfig.test.json",

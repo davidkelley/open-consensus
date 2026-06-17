@@ -13,10 +13,11 @@ export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
 
-    // The route is `openconsensus.dev/install*`, but 404 anything else defensively.
-    // Tolerate a trailing slash (`/install/`).
+    // The route is `openconsensus.dev/install*`; serve only `/install` (tolerating a
+    // trailing slash) and 404 anything else defensively. The bare domain (`/`) is
+    // intentionally NOT served here — it is reserved for a future landing page.
     const path = url.pathname.replace(/\/$/, '') || '/'
-    if (path !== '/install' && path !== '/') {
+    if (path !== '/install') {
       return new Response('Not found\n', { status: 404 })
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
