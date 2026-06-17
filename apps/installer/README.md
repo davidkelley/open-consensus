@@ -22,8 +22,8 @@ curl -fsSL https://openconsensus.dev/install | sh
   signature (cosign / minisign / SLSA is a documented future hardening).
 - `OPEN_CONSENSUS_VERSION` (and the `?version=` query) are validated as a semver
   before reaching any URL or the shell.
-- macOS: it clears `com.apple.quarantine` on the temp file and re-ad-hoc-signs so
-  Gatekeeper accepts the ad-hoc-signed binary (D-PKG6).
+- macOS: it clears `com.apple.quarantine` on the temp file so Gatekeeper accepts the
+  binary (already ad-hoc-signed in CI; the embedded signature survives tar/cp) — D-PKG6.
 
 ## This is an isolated sub-project (not a root workspace member)
 

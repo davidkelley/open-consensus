@@ -111,7 +111,7 @@ ASSET="open-consensus-${TARGET}.tar.gz"
 SUMS="SHA256SUMS"
 
 TMP="$(mktemp -d 2>/dev/null || mktemp -d -t open-consensus)"
-cleanup() { rm -rf "$TMP"; }
+cleanup() { [ -z "${TMP:-}" ] || rm -rf "$TMP"; }
 trap cleanup EXIT INT TERM HUP
 
 echo "Detected target: $TARGET"
@@ -123,7 +123,8 @@ download "$BASE_URL/$SUMS" "$TMP/$SUMS"
 # fail-closed: an empty/missing expected checksum aborts. This is INTEGRITY against
 # corruption/TLS-MITM only; the trust anchor is GitHub + Cloudflare TLS + the
 # GitHub account, NOT an out-of-band signature (cosign/minisign is future work).
-# Tolerate the optional `*` (binary-mode) prefix some sha256sum outputs use.
+# Assumes the GNU `sha256sum` / `shasum -a 256` line format (`<hash>  <file>`) the
+# release CI emits; tolerate the optional `*` (binary-mode) prefix on the filename.
 expected="$(awk -v a="$ASSET" '{f=$2; sub(/^\*/, "", f)} f == a {print $1}' "$TMP/$SUMS")"
 [ -n "$expected" ] || err "no checksum for $ASSET in $SUMS"
 actual="$(sha256_of "$TMP/$ASSET")"

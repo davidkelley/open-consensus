@@ -14,7 +14,9 @@ export default {
     const url = new URL(request.url)
 
     // The route is `openconsensus.dev/install*`, but 404 anything else defensively.
-    if (url.pathname !== '/install' && url.pathname !== '/') {
+    // Tolerate a trailing slash (`/install/`).
+    const path = url.pathname.replace(/\/$/, '') || '/'
+    if (path !== '/install' && path !== '/') {
       return new Response('Not found\n', { status: 404 })
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
