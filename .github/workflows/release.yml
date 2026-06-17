@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create the GitHub Release + upload assets
+
+jobs:
+  build:
+    name: build ${{ matrix.triple }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each target builds on a NATIVE-arch runner (D-PKG5/R2): the native
+          # better-sqlite3 ABI-127 prebuild is fetched per-arch, never cross-built.
+          # (If `ubuntu-24.04-arm` is ever unavailable, swap to a QEMU build step.)
+          - { triple: aarch64-apple-darwin, runner: macos-14 }
+          - { triple: x86_64-apple-darwin, runner: macos-13 }
+          - { triple: x86_64-unknown-linux-gnu, runner: ubuntu-24.04 }
+          - { triple: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pkg-cache
+          key: pkg-cache-${{ matrix.triple }}-node22
+      - run: npm ci
+      - run: npm run build:binary -- --target ${{ matrix.triple }}
+      # macOS: ad-hoc sign so Gatekeeper accepts the binary once the installer
+      # clears com.apple.quarantine (D-PKG6; Developer-ID notarization deferred).
+      - name: Ad-hoc codesign (macOS)
+        if: runner.os == 'macOS'
+        run: codesign --force --sign - "dist-bin/open-consensus-${{ matrix.triple }}"
+      - name: Package tarball + per-target checksum
+        run: |
+          set -euo pipefail
+          # The tarball is named with the triple (the download-URL contract,
+          # D-PKG11) but contains the binary as `open-consensus`, which install.sh
+          # extracts + installs.
+          cp "dist-bin/open-consensus-${{ matrix.triple }}" open-consensus
+          tar -czf "open-consensus-${{ matrix.triple }}.tar.gz" open-consensus
+          shasum -a 256 "open-consensus-${{ matrix.triple }}.tar.gz" > "SHA256SUMS.${{ matrix.triple }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.triple }}
+          path: |
+            open-consensus-${{ matrix.triple }}.tar.gz
+            SHA256SUMS.${{ matrix.triple }}
+          if-no-files-found: error
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Assemble assets + merged SHA256SUMS
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          find artifacts -name 'open-consensus-*.tar.gz' -exec cp {} out/ \;
+          # Concatenate the per-target checksum files into ONE SHA256SUMS in a
+          # single job — avoids the concurrent-upload race a shared file would hit.
+          cat artifacts/*/SHA256SUMS.* | sort -k2 > out/SHA256SUMS
+          echo '=== SHA256SUMS ==='
+          cat out/SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.tar.gz
+            out/SHA256SUMS
+          fail_on_unmatched_files: true

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: build · typecheck · lint · test · e2e · pack
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test # vitest, per-package >=90% coverage gate (no real CLIs, no spend)
+      - run: npm run test:e2e # mock-stack MCP -> daemon -> engine (no spend)
+      - run: npm run smoke:pack # pack the npm tarballs + install into a clean prefix
+
+  binary:
+    name: build + smoke the single binary (linux-x64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # pkg downloads the Node base binary once per (target, node) — cache it.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pkg-cache
+          key: pkg-cache-x86_64-unknown-linux-gnu-node22
+      - run: npm ci
+      - run: npm run build:binary -- --target x86_64-unknown-linux-gnu
+      - run: npm run smoke:binary # daemon start/status/stop (native SQLite) + mcp-server + mcp install
