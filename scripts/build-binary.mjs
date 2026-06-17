@@ -50,6 +50,8 @@ const TARGET_OS = {
 }
 // The Node version the pkg `node22` base binary embeds. better-sqlite3's native
 // addon must match its ABI (NODE_MODULE_VERSION 127), NOT the build machine's Node.
+// Bump this if @yao-pkg/pkg's `node22` base binary moves to a newer 22.x (the ABI
+// is stable across the Node 22 line, so any 22.x value fetches the right prebuild).
 const NODE22 = '22.22.3'
 
 function hostTriple() {

@@ -31,10 +31,24 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Fail fast if the pushed tag and package.json disagree — the binary embeds
+      # package.json's version, so a mismatch would ship mislabeled assets.
+      - name: Verify tag matches package.json version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.pkg-cache
           key: pkg-cache-${{ matrix.triple }}-node22-${{ hashFiles('package-lock.json') }}
+          # On a lockfile bump, seed from the previous warm cache (CI-time only).
+          restore-keys: |
+            pkg-cache-${{ matrix.triple }}-node22-
       - run: npm ci
       - run: npm run build:binary -- --target ${{ matrix.triple }}
       # The runner is the target arch, so the binary runs here: smoke before ship.

@@ -47,6 +47,8 @@ jobs:
         with:
           path: ~/.pkg-cache
           key: pkg-cache-x86_64-unknown-linux-gnu-node22-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            pkg-cache-x86_64-unknown-linux-gnu-node22-
       - run: npm ci
       - run: npm run build:binary -- --target x86_64-unknown-linux-gnu
       - run: npm run smoke:binary # daemon start/status/stop (native SQLite) + mcp-server + mcp install
