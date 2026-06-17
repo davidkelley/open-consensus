@@ -1,6 +1,6 @@
 {
   "name": "open-consensus",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Robust multi-agent consensus execution substrate: an MCP tool + CLI/TUI that drives configured CLI coding agents through panel-based consensus rounds.",
   "type": "module",

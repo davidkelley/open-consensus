@@ -4,7 +4,7 @@ All notable changes to Open Consensus are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project will adopt
 [Semantic Versioning](https://semver.org/) on its first published release.
 
-## [Unreleased]
+## [0.1.0] - 2026-06-17
 
 The initial vertical slice — built stage-by-stage, each cleared by a multi-agent
 `/consensus` reviewer panel.
