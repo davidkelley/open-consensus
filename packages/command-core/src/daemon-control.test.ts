@@ -337,6 +337,20 @@ describe('spawnDetachedDaemon', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('falls back to discarded stdio when OPEN_CONSENSUS_DAEMON_LOG is unwritable', async () => {
+    const prev = process.env.OPEN_CONSENSUS_DAEMON_LOG
+    // A directory path makes openSync(..., 'a') throw EISDIR; the launch must not crash.
+    process.env.OPEN_CONSENSUS_DAEMON_LOG = tmpdir()
+    try {
+      const child = spawnDetachedDaemon({ command: process.execPath, args: ['-e', ''] })
+      expect(typeof child.pid).toBe('number')
+      await new Promise((resolve) => child.on('exit', resolve))
+    } finally {
+      if (prev === undefined) Reflect.deleteProperty(process.env, 'OPEN_CONSENSUS_DAEMON_LOG')
+      else process.env.OPEN_CONSENSUS_DAEMON_LOG = prev
+    }
+  })
 })
 
 describe('daemonLaunchSpec', () => {
