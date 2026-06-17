@@ -3,6 +3,7 @@ dist/
 dist-bin/
 coverage/
 .turbo/
+.wrangler/
 *.tsbuildinfo
 *.log
 .DS_Store
