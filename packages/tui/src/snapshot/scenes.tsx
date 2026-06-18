@@ -1,10 +1,12 @@
-import { Box } from 'ink'
+import { Box, Text } from 'ink'
 import type { ReactElement } from 'react'
+import { FOOTER_HINT } from '../app'
 import { Prompt } from '../components/Prompt'
 import { RunTimelineView } from '../components/RunTimeline'
 import { Transcript, type TranscriptLine } from '../components/Transcript'
 import type { RunTimeline } from '../session/timeline'
 import { theme } from '../theme'
+import { bannerLines } from '../ui/banner'
 import { seg } from '../ui/segments'
 
 /**
@@ -75,7 +77,24 @@ const doneTimeline: RunTimeline = {
 
 const noop = (): void => {}
 
+const bannerTranscript: TranscriptLine[] = bannerLines({
+  version: '0.1.1',
+  cwd: '/Users/dev/github.com/davidkelley/open-consensus',
+}).map((segments, id) => ({ id, segments }))
+
 export const scenes: Scene[] = [
+  {
+    name: 'first-launch',
+    node: (
+      <Box flexDirection="column">
+        <Transcript lines={bannerTranscript} />
+        <Box marginTop={1}>
+          <Prompt onSubmit={noop} busy={false} />
+        </Box>
+        <Text color={theme.muted}>{FOOTER_HINT}</Text>
+      </Box>
+    ),
+  },
   { name: 'transcript', node: <Transcript lines={transcriptLines} /> },
   { name: 'timeline-running', node: <RunTimelineView timeline={runningTimeline} status="open" /> },
   { name: 'timeline-done', node: <RunTimelineView timeline={doneTimeline} status="open" /> },

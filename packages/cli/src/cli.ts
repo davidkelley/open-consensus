@@ -106,6 +106,7 @@ try {
         configFile,
         discoveryPath,
         registry: daemonRegistry(),
+        version,
         ensureDaemon: async () => {
           await ensureDaemonRunning({
             discoveryPath,

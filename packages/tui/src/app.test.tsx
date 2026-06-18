@@ -107,10 +107,12 @@ afterEach(() => {
 })
 
 describe('App', () => {
-  it('renders the greeting and a prompt', () => {
-    const { lastFrame } = renderApp()
-    expect(lastFrame()).toContain('Open Consensus')
-    expect(lastFrame()).toContain('›')
+  it('renders the banner, footer hint, and a prompt', () => {
+    const { lastFrame } = renderApp({ version: '9.9.9' })
+    expect(lastFrame()).toContain('OPEN CONSENSUS') // branded wordmark
+    expect(lastFrame()).toContain('v9.9.9') // version surfaced in the banner
+    expect(lastFrame()).toContain('›') // prompt glyph
+    expect(lastFrame()).toContain('Tab completes') // footer hint
   })
 
   it('dispatches a slash command and prints to the transcript', async () => {

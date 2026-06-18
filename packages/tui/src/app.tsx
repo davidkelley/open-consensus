@@ -12,6 +12,7 @@ import { isTerminal, timelineRows } from './session/timeline'
 import { parseLine } from './slash/parser'
 import { type SlashContext, findCommand } from './slash/registry'
 import { theme } from './theme'
+import { bannerLines } from './ui/banner'
 import { type Segment, redactSegments, seg, toSegments } from './ui/segments'
 
 export interface AppProps {
@@ -26,10 +27,14 @@ export interface AppProps {
   startStream?: (deps: EventStreamDeps) => EventStream
   /** Exit override (defaults to ink's useApp().exit). */
   exit?: () => void
+  /** Release version shown in the banner (defaults to 'dev'). */
+  version?: string
+  /** Working directory shown in the banner (defaults to process.cwd()). */
+  cwd?: string
 }
 
-const GREETING =
-  'Open Consensus — type /help for commands, /run <panel> <prompt> to start, Ctrl+C to cancel/quit.'
+/** Persistent one-line key hint under the prompt. */
+export const FOOTER_HINT = '/help · Tab completes · ↑↓ history · Ctrl+C cancels/quits'
 
 /**
  * The claude-code-style slash-command TUI (plan D19). Finalized lines live in the
@@ -41,15 +46,19 @@ const GREETING =
 export function App(props: AppProps): ReactElement {
   const ink = useApp()
   const doExit = props.exit ?? ink.exit
-  // The greeting is seeded directly (not via print) so it appears exactly once and
-  // is StrictMode-safe. Bypassing the redaction sink is safe ONLY because GREETING
-  // is a static compile-time constant with no user/dynamic content; every DYNAMIC
-  // line must still go through print(), which redacts. Do not seed dynamic content
-  // here.
-  const [lines, setLines] = useState<TranscriptLine[]>([
-    { id: 0, segments: [seg(GREETING, { dim: true })] },
-  ])
-  const idRef = useRef(1)
+  // The banner is seeded via a lazy useState initializer (not a mount effect) so it
+  // appears exactly once and is React-19-StrictMode-safe. Bypassing the redaction
+  // sink is safe ONLY because the banner is built from static text + the version/cwd
+  // (no user-controlled content); every DYNAMIC line must still go through print(),
+  // which redacts. Do not seed dynamic/user content here.
+  const [lines, setLines] = useState<TranscriptLine[]>(() =>
+    bannerLines({ version: props.version, cwd: props.cwd }).map((segments, id) => ({
+      id,
+      segments,
+    })),
+  )
+  // Next transcript id starts after the banner lines.
+  const idRef = useRef(lines.length)
   const [runId, setRunId] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const committed = useRef<Set<string>>(new Set())
@@ -198,7 +207,11 @@ export function App(props: AppProps): ReactElement {
       <Box marginTop={1}>
         <Prompt onSubmit={handleSubmit} busy={busy} />
       </Box>
-      {busy ? <Text color={theme.brandDim}>● working…</Text> : null}
+      {busy ? (
+        <Text color={theme.brandDim}>● working…</Text>
+      ) : (
+        <Text color={theme.muted}>{FOOTER_HINT}</Text>
+      )}
     </Box>
   )
 }

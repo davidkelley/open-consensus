@@ -20,12 +20,15 @@ export * from './slash/registry'
 export { useDaemonEvents } from './hooks/useDaemonEvents'
 export * from './theme'
 export * from './ui/segments'
+export * from './ui/banner'
 
 export interface LaunchOptions {
   configFile: string
   discoveryPath: string
   registry: AdapterRegistry
   ensureDaemon: () => Promise<void>
+  /** Release version shown in the banner. */
+  version?: string
 }
 
 /** Render the TUI and resolve when the user exits. `exitOnCtrlC` is off so the
