@@ -41,6 +41,11 @@ const GREETING =
 export function App(props: AppProps): ReactElement {
   const ink = useApp()
   const doExit = props.exit ?? ink.exit
+  // The greeting is seeded directly (not via print) so it appears exactly once and
+  // is StrictMode-safe. Bypassing the redaction sink is safe ONLY because GREETING
+  // is a static compile-time constant with no user/dynamic content; every DYNAMIC
+  // line must still go through print(), which redacts. Do not seed dynamic content
+  // here.
   const [lines, setLines] = useState<TranscriptLine[]>([
     { id: 0, segments: [seg(GREETING, { dim: true })] },
   ])

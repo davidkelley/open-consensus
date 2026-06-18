@@ -58,10 +58,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     summary: 'list available commands',
     usage: '/help',
     async run(ctx) {
+      // Pad to the widest usage so summaries align — derived, not a magic constant
+      // that silently truncates the longest row.
+      const width = Math.max(...SLASH_COMMANDS.map((c) => c.usage.length)) + 2
       for (const c of SLASH_COMMANDS) {
         ctx.print([
-          seg(c.usage.padEnd(34), { color: theme.brand }),
-          seg(` ${c.summary}`, { dim: true }),
+          seg(c.usage.padEnd(width), { color: theme.brand }),
+          seg(c.summary, { dim: true }),
         ])
       }
     },

@@ -111,26 +111,17 @@ const STATUS_MARK: Record<AgentTimelineStatus, string> = {
   interrupted: '⚠',
 }
 
-/** Render the timeline to plain lines (committed to <Static> on completion). */
-export function timelineLines(t: RunTimeline): string[] {
-  const head = `run ${t.runId}  round ${t.roundIndex}${t.done ? ` — ${t.verdict ?? 'complete'}` : ' — running'}${t.abandoned ? ' (abandoned)' : ''}`
-  const rows = t.agents.map(
-    (a) =>
-      `  ${STATUS_MARK[a.status]} ${a.agentId}: ${a.status}${a.attempts > 1 ? ` (×${a.attempts})` : ''}`,
-  )
-  return [head, ...rows]
-}
-
 /**
  * Render the timeline to styled segment-rows (plan tui-brand-polish). The live
- * region (Stage 2) and the committed handoff (Stage 3) both use this so a running
- * and a finished run look identical. Pure: same shape as {@link timelineLines},
- * with semantic color from {@link statusColor}/{@link verdictColor}.
+ * region and the committed handoff both use this so a running and a finished run
+ * look identical. Pure, with semantic color from {@link statusColor}/
+ * {@link verdictColor}. Run ids use the shared accent color (matching the `/run`
+ * and `/runs` command output).
  */
 export function timelineRows(t: RunTimeline): Segment[][] {
   const head: Segment[] = [
     seg('run ', { dim: true }),
-    seg(t.runId, { color: theme.brand }),
+    seg(t.runId, { color: theme.accent }),
     seg('  round ', { dim: true }),
     seg(String(t.roundIndex), { bold: true }),
   ]
