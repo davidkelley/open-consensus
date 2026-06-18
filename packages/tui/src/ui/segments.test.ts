@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { theme } from '../theme'
 import { seg } from './segments'
 
 describe('seg', () => {
@@ -7,9 +8,9 @@ describe('seg', () => {
   })
 
   it('merges style onto the text', () => {
-    expect(seg('hi', { color: '#fff', bold: true })).toEqual({
+    expect(seg('hi', { color: theme.brand, bold: true })).toEqual({
       text: 'hi',
-      color: '#fff',
+      color: theme.brand,
       bold: true,
     })
   })

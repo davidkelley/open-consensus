@@ -28,6 +28,10 @@ export const theme = {
   muted: '#8b949e',
 } as const
 
+// These switches are intentionally exhaustive with NO `default`: adding a member
+// to AgentTimelineStatus / RunVerdict then fails the build ("function lacks ending
+// return") instead of silently getting a fallback color.
+
 /** Color for an agent's timeline status mark + label. */
 export function statusColor(status: AgentTimelineStatus): string {
   switch (status) {
@@ -42,8 +46,8 @@ export function statusColor(status: AgentTimelineStatus): string {
       return theme.warn
     case 'running':
       return theme.brand
-    default:
-      // pending, unavailable
+    case 'pending':
+    case 'unavailable':
       return theme.muted
   }
 }
@@ -55,8 +59,7 @@ export function verdictColor(verdict: RunVerdict): string {
       return theme.success
     case 'degraded':
       return theme.warn
-    default:
-      // failed
+    case 'failed':
       return theme.danger
   }
 }
