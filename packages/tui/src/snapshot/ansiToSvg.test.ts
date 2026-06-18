@@ -30,11 +30,19 @@ describe('ansiFrameToSvg', () => {
     expect(svg).toContain('text-decoration="underline"')
   })
 
-  it('swaps fg/bg for inverse and resets it', () => {
-    const svg = ansiFrameToSvg(`${esc('[7m')} ${esc('[27m')}x`)
-    // inverse blank: a rect filled with the default fg (the swapped bg)
+  it('swaps fg/bg for inverse so default-inverse text stays visible', () => {
+    const svg = ansiFrameToSvg(`${esc('[7m')}A${esc('[27m')}`)
+    // the cell is painted with the foreground...
     expect(svg).toContain('fill="#d4d4d4"')
-    expect(svg).toContain('>x</text>')
+    // ...and the glyph with the page background (NOT the same color as its cell)
+    expect(svg).toMatch(/<text[^>]*fill="#1e1e1e"[^>]*>A<\/text>/)
+  })
+
+  it('accounts for wide glyphs when positioning later runs', () => {
+    // '世' is double-width (2 cells); the run after it must start 2 columns right.
+    const svg = ansiFrameToSvg(`${esc('[31m')}世${esc('[39m')}X`)
+    // charWidth=9, padX=14 → the glyph occupies cols 0-1, so 'X' starts at col 2.
+    expect(svg).toMatch(/<text x="32\.0"[^>]*>X<\/text>/)
   })
 
   it('maps named (30-37/90-97) and background (40-47) colors', () => {

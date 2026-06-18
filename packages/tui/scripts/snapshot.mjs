@@ -76,8 +76,9 @@ for (const scene of scenes) {
   writeFileSync(svg, ansiFrameToSvg(frame))
   let pngNote = '(no renderer — install librsvg or imagemagick for PNGs)'
   if (renderer) {
-    const res = spawnSync(renderer.bin, renderer.makeArgs(svg, png), { stdio: 'ignore' })
-    pngNote = res.status === 0 ? png : `(${renderer.bin} failed)`
+    const res = spawnSync(renderer.bin, renderer.makeArgs(svg, png), { encoding: 'utf8' })
+    const err = (res.stderr || res.error?.message || '').trim().split('\n')[0] ?? ''
+    pngNote = res.status === 0 ? png : `(${renderer.bin} failed${err ? `: ${err}` : ''})`
   }
   written.push(`  ${scene.name}: ${pngNote}`)
 }

@@ -147,7 +147,7 @@ interface Run {
 
 // Any CSI escape: ESC [ <params> <final letter>. Only `m` (SGR) changes style;
 // other finals (cursor moves etc.) are consumed and ignored.
-const CSI = new RegExp(`${String.fromCharCode(27)}\\[([0-9;]*)([A-Za-z])`, 'g')
+const CSI_SOURCE = `${String.fromCharCode(27)}\\[([0-9;]*)([A-Za-z])`
 
 /** Split one line (which may contain SGR escapes) into styled runs. */
 function parseLine(line: string, initial: Style): { runs: Run[]; end: Style } {
@@ -160,8 +160,9 @@ function parseLine(line: string, initial: Style): { runs: Run[]; end: Style } {
     runs.push({ text, startCol: col, style })
     col += stringWidth(text)
   }
-  CSI.lastIndex = 0
-  let m = CSI.exec(line)
+  // A fresh stateful regex per call: never share `lastIndex` across invocations.
+  const csi = new RegExp(CSI_SOURCE, 'g')
+  let m = csi.exec(line)
   while (m !== null) {
     push(line.slice(last, m.index))
     if (m[2] === 'm') {
@@ -170,7 +171,7 @@ function parseLine(line: string, initial: Style): { runs: Run[]; end: Style } {
       style = applySgr(style, params)
     }
     last = m.index + m[0].length
-    m = CSI.exec(line)
+    m = csi.exec(line)
   }
   push(line.slice(last))
   return { runs, end: style }
@@ -211,7 +212,10 @@ export function ansiFrameToSvg(frame: string, opts: Partial<SvgOptions> = {}): s
       const x = o.padX + run.startCol * o.charWidth
       const w = stringWidth(run.text) * o.charWidth
       const st = run.style
-      const fg = st.inverse ? (st.bg ?? o.foreground) : (st.fg ?? o.foreground)
+      // Inverse swaps fg/bg. With no explicit colors, the text takes the PAGE
+      // background and the cell takes the foreground — otherwise default-inverse
+      // text would be the same color as its own block and vanish.
+      const fg = st.inverse ? (st.bg ?? o.background) : (st.fg ?? o.foreground)
       const bg = st.inverse ? (st.fg ?? o.foreground) : st.bg
       const blank = run.text.trim() === ''
       if (bg !== undefined && w > 0) {
