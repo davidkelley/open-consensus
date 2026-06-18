@@ -38,6 +38,13 @@ describe('ansiFrameToSvg', () => {
     expect(svg).toMatch(/<text[^>]*fill="#1e1e1e"[^>]*>A<\/text>/)
   })
 
+  it('inverse with explicit colors swaps the explicit fg and bg', () => {
+    const svg = ansiFrameToSvg(`${esc('[38;2;10;20;30m')}${esc('[48;2;200;100;50m')}${esc('[7m')}A`)
+    // under inverse: glyph takes the explicit bg, cell takes the explicit fg
+    expect(svg).toMatch(/<text[^>]*fill="#c86432"[^>]*>A<\/text>/)
+    expect(svg).toContain('fill="#0a141e"')
+  })
+
   it('accounts for wide glyphs when positioning later runs', () => {
     // '世' is double-width (2 cells); the run after it must start 2 columns right.
     const svg = ansiFrameToSvg(`${esc('[31m')}世${esc('[39m')}X`)
