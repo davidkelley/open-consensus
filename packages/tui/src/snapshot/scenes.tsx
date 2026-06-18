@@ -15,6 +15,9 @@ import type { RunTimeline } from '../session/timeline'
 export interface Scene {
   name: string
   node: ReactElement
+  /** Optional keystrokes to type into the scene after it mounts (drives stateful
+   *  components like the prompt's autocomplete). */
+  input?: string
 }
 
 const transcriptLines: TranscriptLine[] = [
@@ -67,5 +70,14 @@ export const scenes: Scene[] = [
         <Prompt onSubmit={noop} busy={false} />
       </Box>
     ),
+  },
+  {
+    name: 'prompt-autocomplete',
+    node: (
+      <Box flexDirection="column">
+        <Prompt onSubmit={noop} busy={false} />
+      </Box>
+    ),
+    input: '/r',
   },
 ]

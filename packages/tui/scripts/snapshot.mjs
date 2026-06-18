@@ -65,8 +65,12 @@ function pickRenderer() {
 const renderer = pickRenderer()
 const written = []
 for (const scene of scenes) {
-  const { lastFrame, unmount } = render(scene.node)
+  const { lastFrame, unmount, stdin } = render(scene.node)
   await delay(40)
+  if (scene.input) {
+    stdin.write(scene.input)
+    await delay(40)
+  }
   const frame = lastFrame() ?? ''
   unmount()
   const txt = join(outDir, `${scene.name}.txt`)

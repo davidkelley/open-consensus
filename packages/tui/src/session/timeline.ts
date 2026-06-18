@@ -1,4 +1,6 @@
 import type { EngineEvent } from '@open-consensus/engine'
+import { statusColor, theme, verdictColor } from '../theme'
+import { type Segment, seg } from '../ui/segments'
 
 /**
  * Pure reducer for a run's live consensus timeline (plan D19/D11). The TUI feeds
@@ -23,11 +25,13 @@ export interface AgentTimeline {
   attempts: number
 }
 
+export type RunVerdict = 'met' | 'degraded' | 'failed'
+
 export interface RunTimeline {
   runId: string
   roundIndex: number
   agents: AgentTimeline[]
-  verdict?: 'met' | 'degraded' | 'failed'
+  verdict?: RunVerdict
   done: boolean
   abandoned: boolean
 }
@@ -114,5 +118,39 @@ export function timelineLines(t: RunTimeline): string[] {
     (a) =>
       `  ${STATUS_MARK[a.status]} ${a.agentId}: ${a.status}${a.attempts > 1 ? ` (×${a.attempts})` : ''}`,
   )
+  return [head, ...rows]
+}
+
+/**
+ * Render the timeline to styled segment-rows (plan tui-brand-polish). The live
+ * region (Stage 2) and the committed handoff (Stage 3) both use this so a running
+ * and a finished run look identical. Pure: same shape as {@link timelineLines},
+ * with semantic color from {@link statusColor}/{@link verdictColor}.
+ */
+export function timelineRows(t: RunTimeline): Segment[][] {
+  const head: Segment[] = [
+    seg('run ', { dim: true }),
+    seg(t.runId, { color: theme.brand }),
+    seg('  round ', { dim: true }),
+    seg(String(t.roundIndex), { bold: true }),
+  ]
+  if (t.done) {
+    head.push(
+      seg(` — ${t.verdict ?? 'complete'}`, {
+        color: t.verdict ? verdictColor(t.verdict) : theme.success,
+        bold: true,
+      }),
+    )
+  } else {
+    head.push(seg(' — running', { color: theme.brand }))
+  }
+  if (t.abandoned) head.push(seg(' (abandoned)', { color: theme.warn }))
+
+  const rows = t.agents.map((a): Segment[] => [
+    seg(`  ${STATUS_MARK[a.status]} `, { color: statusColor(a.status) }),
+    seg(a.agentId, { bold: true }),
+    seg(`: ${a.status}`, { dim: true }),
+    ...(a.attempts > 1 ? [seg(` (×${a.attempts})`, { dim: true })] : []),
+  ])
   return [head, ...rows]
 }

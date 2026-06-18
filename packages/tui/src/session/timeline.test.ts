@@ -1,6 +1,13 @@
 import type { EngineEvent } from '@open-consensus/engine'
 import { describe, expect, it } from 'vitest'
-import { type RunTimeline, applyEvent, emptyTimeline, timelineLines } from './timeline'
+import { theme } from '../theme'
+import {
+  type RunTimeline,
+  applyEvent,
+  emptyTimeline,
+  timelineLines,
+  timelineRows,
+} from './timeline'
 
 const RUN = 'run1'
 function reduce(events: EngineEvent[]): RunTimeline {
@@ -95,5 +102,53 @@ describe('timeline reducer', () => {
       agentIds: ['a'],
     })
     expect(timelineLines(t)[0]).toMatch(/— running/)
+  })
+})
+
+describe('timelineRows', () => {
+  const flat = (segs: { text: string }[]): string => segs.map((s) => s.text).join('')
+
+  it('colors the brand run id and a running header', () => {
+    const t: RunTimeline = {
+      runId: 'r9',
+      roundIndex: 2,
+      agents: [{ agentId: 'a', status: 'running', attempts: 1 }],
+      done: false,
+      abandoned: false,
+    }
+    const rows = timelineRows(t)
+    expect(flat(rows[0] ?? [])).toBe('run r9  round 2 — running')
+    expect((rows[0] ?? []).some((s) => s.text === 'r9' && s.color === theme.brand)).toBe(true)
+    // the agent mark carries the status color
+    expect((rows[1] ?? [])[0]?.color).toBe(theme.brand) // running mark
+    expect(flat(rows[1] ?? [])).toBe('  ◐ a: running')
+  })
+
+  it('colors the verdict on a completed run and shows attempts', () => {
+    const t: RunTimeline = {
+      runId: 'r9',
+      roundIndex: 1,
+      agents: [{ agentId: 'a', status: 'ok', attempts: 2 }],
+      done: true,
+      verdict: 'met',
+      abandoned: false,
+    }
+    const rows = timelineRows(t)
+    expect(flat(rows[0] ?? [])).toBe('run r9  round 1 — met')
+    expect((rows[0] ?? []).some((s) => s.text === ' — met' && s.color === theme.success)).toBe(true)
+    expect(flat(rows[1] ?? [])).toBe('  ✓ a: ok (×2)')
+  })
+
+  it('falls back to "complete" with no verdict and marks abandoned', () => {
+    const t: RunTimeline = {
+      runId: 'r9',
+      roundIndex: 0,
+      agents: [],
+      done: true,
+      abandoned: true,
+    }
+    const head = flat(timelineRows(t)[0] ?? [])
+    expect(head).toContain('— complete')
+    expect(head).toContain('(abandoned)')
   })
 })

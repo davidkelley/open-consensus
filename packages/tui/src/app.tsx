@@ -11,6 +11,7 @@ import type { EventStream, EventStreamDeps } from './session/sse'
 import { isTerminal, timelineLines } from './session/timeline'
 import { parseLine } from './slash/parser'
 import { type SlashContext, findCommand } from './slash/registry'
+import { theme } from './theme'
 
 export interface AppProps {
   configFile: string
@@ -177,7 +178,7 @@ export function App(props: AppProps): ReactElement {
       <Box marginTop={1}>
         <Prompt onSubmit={handleSubmit} busy={busy} />
       </Box>
-      {busy ? <Text dimColor>working…</Text> : null}
+      {busy ? <Text color={theme.brandDim}>● working…</Text> : null}
     </Box>
   )
 }

@@ -18,6 +18,8 @@ export * from './slash/parser'
 export * from './slash/autocomplete'
 export * from './slash/registry'
 export { useDaemonEvents } from './hooks/useDaemonEvents'
+export * from './theme'
+export * from './ui/segments'
 
 export interface LaunchOptions {
   configFile: string
