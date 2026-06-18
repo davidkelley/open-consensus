@@ -291,6 +291,32 @@ describe('App', () => {
     expect(lastFrame()).not.toContain('SECRETSECRETSECRET')
   })
 
+  it('renders a thrown command error in the transcript', async () => {
+    const { stdin, lastFrame } = renderApp()
+    stdin.write('/run p') // missing prompt -> the command throws before any RPC
+    await tick()
+    stdin.write('\r')
+    await waitForFrame(lastFrame, 'error: missing prompt')
+    expect(lastFrame()).toContain('error: missing prompt')
+  })
+
+  it('reports a failed cancel request', async () => {
+    const { stdin, lastFrame } = renderApp({
+      cancelRun: async () => {
+        throw new Error('boom')
+      },
+    })
+    stdin.write('/run p review this')
+    await tick()
+    stdin.write('\r')
+    await waitUntil(() => streamDeps !== undefined)
+    emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
+    await waitForFrame(lastFrame, 'a: pending')
+    stdin.write(CTRL_C)
+    await waitForFrame(lastFrame, 'cancel request failed')
+    expect(lastFrame()).toContain('cancel request failed')
+  })
+
   it('commits an abandoned run to scrollback (no orchestrator)', async () => {
     const { stdin, lastFrame } = renderApp()
     stdin.write('/run p review this')

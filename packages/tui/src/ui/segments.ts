@@ -17,3 +17,17 @@ export interface Segment {
 export function seg(text: string, style: Omit<Segment, 'text'> = {}): Segment {
   return { text, ...style }
 }
+
+/** Normalize a print argument to segments (a bare string becomes one plain segment). */
+export function toSegments(line: string | Segment[]): Segment[] {
+  return typeof line === 'string' ? [seg(line)] : line
+}
+
+/**
+ * Redact every segment's text with `redact`, preserving style. Used at the single
+ * transcript sink so a secret in ANY segment (not just the first) is scrubbed
+ * before it can reach the terminal's persistent scrollback (the D10/D19 invariant).
+ */
+export function redactSegments(segments: Segment[], redact: (s: string) => string): Segment[] {
+  return segments.map((s) => ({ ...s, text: redact(s.text) }))
+}

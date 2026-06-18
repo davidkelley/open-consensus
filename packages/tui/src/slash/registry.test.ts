@@ -72,7 +72,9 @@ beforeEach(async () => {
     configCtx: { configFile: join(dir, 'config.json') },
     registry: registry(),
     discoveryPath: join(dir, 'discovery.json'),
-    print: (l) => out.push(l),
+    // Flatten styled segments back to plain text for assertions (the styling is
+    // covered elsewhere; here we only care about the content the commands emit).
+    print: (l) => out.push(typeof l === 'string' ? l : l.map((s) => s.text).join('')),
     ensureDaemon: async () => undefined,
     viewRun: (id) => viewed.push(id),
     hasActiveRun: () => active,

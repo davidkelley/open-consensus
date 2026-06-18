@@ -4,6 +4,8 @@ import { Prompt } from '../components/Prompt'
 import { RunTimelineView } from '../components/RunTimeline'
 import { Transcript, type TranscriptLine } from '../components/Transcript'
 import type { RunTimeline } from '../session/timeline'
+import { theme } from '../theme'
+import { seg } from '../ui/segments'
 
 /**
  * The snapshot scene catalog (plan tui-brand-polish, Stage 1). Each scene is the
@@ -21,13 +23,27 @@ export interface Scene {
 }
 
 const transcriptLines: TranscriptLine[] = [
-  { id: 0, text: 'Open Consensus — type /help for commands, /run <panel> <prompt> to start.' },
-  { id: 1, text: '› /agents' },
-  { id: 2, text: 'claude  (claude / opus)' },
-  { id: 3, text: 'codex  (codex)' },
-  { id: 4, text: '› /run review ship the release' },
-  { id: 5, text: "started run r-7f3a on panel 'review'" },
-  { id: 6, text: 'error: missing prompt' },
+  {
+    id: 0,
+    segments: [
+      seg('Open Consensus — type /help for commands, /run <panel> <prompt> to start.', {
+        dim: true,
+      }),
+    ],
+  },
+  { id: 1, segments: [seg('› ', { color: theme.brandDim }), seg('/agents')] },
+  { id: 2, segments: [seg('claude', { bold: true }), seg('  (claude / opus)', { dim: true })] },
+  { id: 3, segments: [seg('codex', { bold: true }), seg('  (codex)', { dim: true })] },
+  { id: 4, segments: [seg('› ', { color: theme.brandDim }), seg('/run review ship the release')] },
+  {
+    id: 5,
+    segments: [
+      seg('started run '),
+      seg('r-7f3a', { color: theme.accent, bold: true }),
+      seg(" on panel 'review'", { dim: true }),
+    ],
+  },
+  { id: 6, segments: [seg('error: missing prompt', { color: theme.danger })] },
 ]
 
 const runningTimeline: RunTimeline = {

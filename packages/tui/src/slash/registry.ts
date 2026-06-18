@@ -13,6 +13,8 @@ import {
   testAgentCommand,
 } from '@open-consensus/command-core'
 import type { AdapterRegistry } from '@open-consensus/daemon'
+import { theme } from '../theme'
+import { type Segment, seg } from '../ui/segments'
 
 /**
  * The TUI slash-command surface (plan D19). Handlers are **thin calls into the
@@ -25,8 +27,8 @@ export interface SlashContext {
   configCtx: ConfigContext
   registry: AdapterRegistry
   discoveryPath: string
-  /** Append a line to the transcript. */
-  print: (line: string) => void
+  /** Append a line to the transcript (a plain string, or styled segments). */
+  print: (line: string | Segment[]) => void
   /** Ensure the daemon is running (auto-start); throws if it can't be reached. */
   ensureDaemon: () => Promise<void>
   /** Begin streaming a run's live timeline into the in-progress region. */
@@ -56,7 +58,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     summary: 'list available commands',
     usage: '/help',
     async run(ctx) {
-      for (const c of SLASH_COMMANDS) ctx.print(`${c.usage.padEnd(34)} ${c.summary}`)
+      for (const c of SLASH_COMMANDS) {
+        ctx.print([
+          seg(c.usage.padEnd(34), { color: theme.brand }),
+          seg(` ${c.summary}`, { dim: true }),
+        ])
+      }
     },
   },
   {
@@ -65,8 +72,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     usage: '/agents',
     async run(ctx) {
       const agents = listAgentsCommand(ctx.configCtx)
-      if (agents.length === 0) return ctx.print('no agents configured')
-      for (const a of agents) ctx.print(`${a.id}  (${a.adapter}${a.model ? ` / ${a.model}` : ''})`)
+      if (agents.length === 0) return ctx.print([seg('no agents configured', { dim: true })])
+      for (const a of agents) {
+        ctx.print([
+          seg(a.id, { bold: true }),
+          seg(`  (${a.adapter}${a.model ? ` / ${a.model}` : ''})`, { dim: true }),
+        ])
+      }
     },
   },
   {
@@ -86,20 +98,32 @@ export const SLASH_COMMANDS: SlashCommand[] = [
           { id, adapter, ...(allow ? { allowUnsandboxed: true } : {}) },
           ctx.registry,
         )
-        ctx.print(`added agent '${result.agent.id}' (${result.agent.adapter})`)
-        for (const w of result.warnings) ctx.print(`  warning: ${w}`)
+        ctx.print([
+          seg('added agent '),
+          seg(`'${result.agent.id}'`, { color: theme.success, bold: true }),
+          seg(` (${result.agent.adapter})`, { dim: true }),
+        ])
+        for (const w of result.warnings) ctx.print([seg(`  warning: ${w}`, { color: theme.warn })])
       } else if (sub === 'remove') {
         removeAgentCommand(ctx.configCtx, id, args.includes('--force'))
-        ctx.print(`removed agent '${id}'`)
+        ctx.print([seg('removed agent '), seg(`'${id}'`, { bold: true })])
       } else if (sub === 'test') {
         const r = await testAgentCommand(ctx.configCtx, id, ctx.registry)
         const avail = r.detected.available
           ? `available (${r.detected.version ?? '?'})`
           : `unavailable (${r.detected.reason ?? '?'})`
-        ctx.print(`${r.adapter}: ${avail}`)
-        ctx.print(`would run: ${r.invocation.file} ${r.invocation.args.join(' ')}`)
+        ctx.print([
+          seg(`${r.adapter}: `, { bold: true }),
+          seg(avail, { color: r.detected.available ? theme.success : theme.danger }),
+        ])
+        ctx.print([
+          seg('would run: ', { dim: true }),
+          seg(`${r.invocation.file} ${r.invocation.args.join(' ')}`),
+        ])
         const envKeys = r.invocation.envKeys.join(', ') || '(none)'
-        ctx.print(`prompt delivery: ${r.invocation.promptDelivery}  env: ${envKeys}`)
+        ctx.print([
+          seg(`prompt delivery: ${r.invocation.promptDelivery}  env: ${envKeys}`, { dim: true }),
+        ])
       } else {
         throw new Error(`unknown agent subcommand '${sub}'`)
       }
@@ -111,8 +135,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     usage: '/panels',
     async run(ctx) {
       const panels = listPanelsCommand(ctx.configCtx)
-      if (panels.length === 0) return ctx.print('no panels configured')
-      for (const p of panels) ctx.print(`${p.id}  [${p.agentIds.join(', ')}]  quorum ${p.quorum}`)
+      if (panels.length === 0) return ctx.print([seg('no panels configured', { dim: true })])
+      for (const p of panels) {
+        ctx.print([
+          seg(p.id, { bold: true }),
+          seg(`  [${p.agentIds.join(', ')}]  quorum ${p.quorum}`, { dim: true }),
+        ])
+      }
     },
   },
   {
@@ -128,16 +157,22 @@ export const SLASH_COMMANDS: SlashCommand[] = [
           .map((s) => s.trim())
           .filter(Boolean)
         const created = createPanelCommand(ctx.configCtx, { id, agentIds })
-        ctx.print(
-          `created panel '${created.id}' (${created.agentIds.length} agents, quorum ${created.quorum})`,
-        )
+        ctx.print([
+          seg('created panel '),
+          seg(`'${created.id}'`, { color: theme.success, bold: true }),
+          seg(` (${created.agentIds.length} agents, quorum ${created.quorum})`, { dim: true }),
+        ])
       } else if (sub === 'set-quorum') {
         const n = Number(requireArg(args, 2, 'quorum'))
         const updated = setQuorumCommand(ctx.configCtx, id, n)
-        ctx.print(`panel '${id}' quorum set to ${updated.quorum}`)
+        ctx.print([
+          seg('panel '),
+          seg(`'${id}'`, { bold: true }),
+          seg(` quorum set to ${updated.quorum}`, { dim: true }),
+        ])
       } else if (sub === 'remove') {
         removePanelCommand(ctx.configCtx, id)
-        ctx.print(`removed panel '${id}'`)
+        ctx.print([seg('removed panel '), seg(`'${id}'`, { bold: true })])
       } else {
         throw new Error(`unknown panel subcommand '${sub}'`)
       }
@@ -150,8 +185,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     async run(ctx) {
       await ctx.ensureDaemon()
       const runs = await listRunsCommand(ctx.discoveryPath)
-      if (runs.length === 0) return ctx.print('no runs')
-      for (const r of runs) ctx.print(`${r.runId}  ${r.state}  panel=${r.panelId}`)
+      if (runs.length === 0) return ctx.print([seg('no runs', { dim: true })])
+      for (const r of runs) {
+        ctx.print([
+          seg(r.runId, { color: theme.accent }),
+          seg(`  ${r.state}`, { bold: true }),
+          seg(`  panel=${r.panelId}`, { dim: true }),
+        ])
+      }
     },
   },
   {
@@ -167,7 +208,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       if (prompt.length === 0) throw new Error('missing prompt')
       await ctx.ensureDaemon()
       const result = await startRunCommand(ctx.discoveryPath, { panel, prompt })
-      ctx.print(`started run ${result.runId} on panel '${panel}'`)
+      ctx.print([
+        seg('started run '),
+        seg(result.runId, { color: theme.accent, bold: true }),
+        seg(` on panel '${panel}'`, { dim: true }),
+      ])
       ctx.viewRun(result.runId)
     },
   },
@@ -179,10 +224,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       const sub = args[0] ?? 'status'
       if (sub !== 'status') throw new Error(`unknown daemon subcommand '${sub}' (only: status)`)
       const status = await daemonStatusCommand(ctx.discoveryPath)
-      if (!status.running) return ctx.print('daemon is not running')
-      ctx.print(
-        `daemon ${status.healthy ? 'running (healthy)' : 'present but not answering'} on ${status.endpoint}`,
-      )
+      if (!status.running) return ctx.print([seg('daemon is not running', { color: theme.danger })])
+      ctx.print([
+        seg('daemon '),
+        seg(status.healthy ? 'running (healthy)' : 'present but not answering', {
+          color: status.healthy ? theme.success : theme.warn,
+        }),
+        seg(` on ${status.endpoint}`, { dim: true }),
+      ])
     },
   },
   {
