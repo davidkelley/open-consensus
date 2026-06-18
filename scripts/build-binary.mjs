@@ -71,6 +71,10 @@ if (!pkgTarget) {
   throw new Error(`unknown target '${triple}'. Known: ${Object.keys(TARGETS).join(', ')}`)
 }
 
+// The release version (root package.json) — embedded in the SEA manifest below AND
+// injected into the bundle as __OC_VERSION__ so the binary's `--version` reports it.
+const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+
 const outDir = join(root, 'dist-bin')
 const stageDir = join(outDir, 'stage')
 const bundle = join(stageDir, 'app.mjs')
@@ -96,6 +100,9 @@ await build({
   // The native addon is excluded from the JS bundle; it ships as a resolvable
   // node_modules asset (copied below) so `import 'better-sqlite3'` resolves.
   external: ['better-sqlite3'],
+  // Bake the release version into the bundle so `--version` works in the packaged
+  // binary (package.json isn't reliably readable from the SEA VFS at runtime).
+  define: { __OC_VERSION__: JSON.stringify(version) },
   banner: {
     js: [
       "import { createRequire as __ocCreateRequire } from 'node:module'",
@@ -161,9 +168,9 @@ if (!existsSync(stagedNode)) {
   )
 }
 
-// The SEA-mode project manifest (type:module + ESM bin + sea:true). Version is read
-// from the root package.json so the embedded metadata matches the release.
-const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+// The SEA-mode project manifest (type:module + ESM bin + sea:true). `version`
+// (read above from the root package.json) keeps the embedded metadata matching
+// the release.
 writeFileSync(
   stagePkgJson,
   `${JSON.stringify(

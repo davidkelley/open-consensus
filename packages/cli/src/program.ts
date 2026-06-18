@@ -46,6 +46,12 @@ export interface CliDeps {
   discoveryPath: string
   /** Adapter registry (for detect/sandbox checks); unsandboxed adapters included. */
   registry: AdapterRegistry
+  /**
+   * The version string surfaced by `--version`. Injected at bundle time (the
+   * release version) by `cli.ts`, and stubbed in tests, so `program.ts` stays a
+   * pure function of its deps.
+   */
+  version: string
   /** Sink for normal output (injected so tests can capture it). */
   out: (line: string) => void
   /** Sink for warnings/errors. */
@@ -125,6 +131,11 @@ export function buildProgram(deps: CliDeps): Command {
   program
     .name('open-consensus')
     .description('Open Consensus — manage agents, panels, the daemon, and consensus runs')
+    .version(deps.version)
+    // Route commander's own stdout (`--version`, `--help`) through the injected
+    // `out` sink so it honors the CLI's single output discipline and is capturable
+    // in tests; one trailing newline is dropped since `out` is line-oriented.
+    .configureOutput({ writeOut: (s) => deps.out(s.replace(/\n$/, '')) })
     .exitOverride()
     // No subcommand -> launch the interactive slash-command TUI (D19).
     .action(async () => {

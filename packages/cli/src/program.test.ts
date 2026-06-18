@@ -92,6 +92,7 @@ beforeEach(async () => {
     configFile: join(dir, 'config.json'),
     discoveryPath: join(dir, 'discovery.json'),
     registry: registry(),
+    version: '9.9.9-test',
     out: (l) => out.push(l),
     err: (l) => err.push(l),
     // "Starting" the daemon publishes a discovery file pointing at the fake server.
@@ -119,6 +120,18 @@ afterEach(() => {
 
 const argv = (...args: string[]) => ['node', 'open-consensus', ...args]
 const addClaude = (id: string) => run(argv('agent', 'add', id, '--adapter', 'claude'), deps)
+
+describe('program-level options', () => {
+  it('prints the injected version with --version (routed through the out sink)', async () => {
+    // commander writes the version via its writeOut (-> our `out` sink) and then,
+    // under exitOverride, throws a terminal CommanderError with exit code 0.
+    await expect(run(argv('--version'), deps)).rejects.toMatchObject({
+      code: 'commander.version',
+      exitCode: 0,
+    })
+    expect(out.join('\n')).toContain('9.9.9-test')
+  })
+})
 
 describe('agent commands', () => {
   it('adds an agent (with options), warns on undetected, lists, updates, removes', async () => {

@@ -61,6 +61,14 @@ async function serveDaemon(): Promise<void> {
 // via a shell-interposed clean execve — see `daemonLaunchSpec`.
 const cliEntry = fileURLToPath(import.meta.url)
 const packaged = isPackaged()
+
+// Injected at bundle time by esbuild (`scripts/build-binary.mjs`) and tsup so
+// `--version` reports the release version even inside the packaged binary, where
+// reading package.json back out of the SEA VFS is unreliable. `typeof` is the one
+// operator safe on an undeclared global, so a raw/unbundled run falls back cleanly.
+declare const __OC_VERSION__: string
+const version = typeof __OC_VERSION__ !== 'undefined' ? __OC_VERSION__ : '0.0.0-dev'
+
 const configFile = resolveConfigFile()
 const discoveryPath = daemonDiscoveryPath()
 const launchDaemon = (): void => {
@@ -76,6 +84,7 @@ try {
     configFile,
     discoveryPath,
     registry: daemonRegistry(),
+    version,
     out: (line) => console.log(line),
     err: (line) => process.stderr.write(`${line}\n`),
     launchDaemon,

@@ -4,6 +4,15 @@ All notable changes to Open Consensus are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project will adopt
 [Semantic Versioning](https://semver.org/) on its first published release.
 
+## [Unreleased]
+
+### Fixed
+
+- **CLI `--version`** — `open-consensus --version` (and `-V`) now prints the
+  release version instead of erroring with `unknown option`. The version is baked
+  into the bundle at build time (esbuild/tsup `define`) so it resolves inside the
+  packaged binary, where reading `package.json` from the SEA VFS is unreliable.
+
 ## [0.1.0] - 2026-06-17
 
 The initial vertical slice — built stage-by-stage, each cleared by a multi-agent
