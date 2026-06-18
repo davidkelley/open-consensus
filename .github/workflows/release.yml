@@ -17,13 +17,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Each target builds on a NATIVE-arch runner (D-PKG5/R2): the native
-          # better-sqlite3 ABI-127 prebuild is fetched per-arch, never cross-built.
+          # build-binary.mjs fetches the target's better-sqlite3 ABI-127 prebuild by
+          # --platform/--arch (an HTTP download) and pkg fetches the target's node22
+          # base, so the build itself is host-independent (R2 is handled by fetching
+          # the correct-arch addon + asserting it exists, NOT by the runner arch).
+          # `smoke` is true only where the runner can natively EXECUTE the binary.
+          #
+          # x86_64-apple-darwin is CROSS-built on the arm64 macos-14 runner: GitHub's
+          # Intel (macos-13) pool is so scarce the job can queue 45min+, whereas
+          # arm64 macOS is plentiful. The x64 Mach-O + its x64 addon are verified
+          # structurally (build-binary asserts the prebuild arch) but can't run on
+          # arm64, so its smoke is skipped — covered by the native arm64-darwin smoke
+          # (same OS code path) and the linux-x64 smoke in ci.yml.
           # (If `ubuntu-24.04-arm` is ever unavailable, swap to a QEMU build step.)
-          - { triple: aarch64-apple-darwin, runner: macos-14 }
-          - { triple: x86_64-apple-darwin, runner: macos-13 }
-          - { triple: x86_64-unknown-linux-gnu, runner: ubuntu-24.04 }
-          - { triple: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm }
+          - { triple: aarch64-apple-darwin, runner: macos-14, smoke: true }
+          - { triple: x86_64-apple-darwin, runner: macos-14, smoke: false }
+          - { triple: x86_64-unknown-linux-gnu, runner: ubuntu-24.04, smoke: true }
+          - { triple: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm, smoke: true }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -51,8 +61,10 @@ jobs:
             pkg-cache-${{ matrix.triple }}-node22-
       - run: npm ci
       - run: npm run build:binary -- --target ${{ matrix.triple }}
-      # The runner is the target arch, so the binary runs here: smoke before ship.
+      # Smoke only where the runner can natively execute the binary (skipped for the
+      # cross-built x86_64-apple-darwin — an x64 Mach-O won't run on the arm64 runner).
       - run: npm run smoke:binary
+        if: matrix.smoke
       # macOS: ad-hoc sign so Gatekeeper accepts the binary once the installer
       # clears com.apple.quarantine (D-PKG6; Developer-ID notarization deferred).
       # Ad-hoc signatures are embedded in the binary (not xattrs), so the later
