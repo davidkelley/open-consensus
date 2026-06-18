@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "snapshot": "FORCE_COLOR=3 node scripts/snapshot.mjs"
   },
   "dependencies": {
     "@open-consensus/command-core": "*",
@@ -27,8 +28,10 @@
   "devDependencies": {
     "@types/react": "^19.2.0",
     "@vitest/coverage-v8": "^2.1.8",
+    "esbuild": "^0.28.1",
     "ink-testing-library": "^4.0.0",
     "react-devtools-core": "^6.1.2",
+    "string-width": "^5.1.2",
     "vitest": "^2.1.8"
   }
 }
