@@ -120,6 +120,16 @@ const STATUS_MARK: Record<AgentTimelineStatus, string> = {
   interrupted: '⚠',
 }
 
+// Liveness spinner cycled on the `running` mark so a slow round reads as alive, not
+// hung. A spinner (not a wall-clock timer) avoids needing a daemon start-timestamp
+// and is reconnect-safe (a reconnect just restarts the cycle).
+const SPINNER = ['◐', '◓', '◑', '◒'] as const
+
+/** The spinner glyph for a given frame (wraps). Pure — the live region holds the frame. */
+export function spinnerMark(frame: number): string {
+  return SPINNER[((frame % SPINNER.length) + SPINNER.length) % SPINNER.length] ?? '◐'
+}
+
 /**
  * Render the timeline to styled segment-rows (plan tui-brand-polish). The live
  * region and the committed handoff both use this so a running and a finished run
@@ -127,7 +137,7 @@ const STATUS_MARK: Record<AgentTimelineStatus, string> = {
  * {@link verdictColor}. Run ids use the shared accent color (matching the `/run`
  * and `/runs` command output).
  */
-export function timelineRows(t: RunTimeline): Segment[][] {
+export function timelineRows(t: RunTimeline, frame = 0): Segment[][] {
   const head: Segment[] = [
     seg('run ', { dim: true }),
     seg(shortId(t.runId), { color: theme.accent }),
@@ -144,14 +154,18 @@ export function timelineRows(t: RunTimeline): Segment[][] {
   } else {
     head.push(seg(' — running', { color: theme.brand }))
   }
-  if (t.abandoned) head.push(seg(' (abandoned)', { color: theme.warn }))
+  if (t.abandoned)
+    head.push(seg(' (abandoned — no orchestrator driving it)', { color: theme.warn }))
 
   // An empty round would otherwise render just a header and read as a silent stall.
   if (t.agents.length === 0) {
     return [head, [seg('  (no agents in this round)', { dim: true })]]
   }
   const rows = t.agents.map((a): Segment[] => [
-    seg(`  ${STATUS_MARK[a.status]} `, { color: statusColor(a.status) }),
+    // The running mark spins (frame from the live region); others are static.
+    seg(`  ${a.status === 'running' ? spinnerMark(frame) : STATUS_MARK[a.status]} `, {
+      color: statusColor(a.status),
+    }),
     seg(a.agentId, { bold: true }),
     seg(`: ${a.status}`, { dim: true }),
     ...(a.attempts > 1 ? [seg(` (×${a.attempts})`, { dim: true })] : []),

@@ -1,7 +1,14 @@
 import type { EngineEvent } from '@open-consensus/engine'
 import { describe, expect, it } from 'vitest'
 import { theme } from '../theme'
-import { type RunTimeline, applyEvent, emptyTimeline, shortId, timelineRows } from './timeline'
+import {
+  type RunTimeline,
+  applyEvent,
+  emptyTimeline,
+  shortId,
+  spinnerMark,
+  timelineRows,
+} from './timeline'
 
 const RUN = 'run1'
 function reduce(events: EngineEvent[]): RunTimeline {
@@ -114,7 +121,25 @@ describe('timelineRows', () => {
     }
     const head = flat(timelineRows(t)[0] ?? [])
     expect(head).toContain('— complete')
-    expect(head).toContain('(abandoned)')
+    expect(head).toContain('(abandoned — no orchestrator driving it)')
+  })
+
+  it('spins the running agent mark with the frame (others stay static)', () => {
+    const t: RunTimeline = {
+      runId: 'r9',
+      roundIndex: 1,
+      agents: [
+        { agentId: 'a', status: 'running', attempts: 1 },
+        { agentId: 'b', status: 'ok', attempts: 1 },
+      ],
+      done: false,
+      abandoned: false,
+    }
+    expect(flat(timelineRows(t, 0)[1] ?? [])).toBe('  ◐ a: running')
+    expect(flat(timelineRows(t, 1)[1] ?? [])).toBe('  ◓ a: running')
+    expect(flat(timelineRows(t, 2)[1] ?? [])).toBe('  ◑ a: running')
+    // a non-running agent is unaffected by the frame
+    expect(flat(timelineRows(t, 1)[2] ?? [])).toBe('  ✓ b: ok')
   })
 
   it('shortens a UUID run id in the header (display only)', () => {
@@ -144,5 +169,11 @@ describe('shortId', () => {
   })
   it('leaves an already-short id unchanged', () => {
     expect(shortId('r9')).toBe('r9')
+  })
+})
+
+describe('spinnerMark', () => {
+  it('cycles the four frames and wraps', () => {
+    expect([0, 1, 2, 3, 4, 5].map(spinnerMark)).toEqual(['◐', '◓', '◑', '◒', '◐', '◓'])
   })
 })

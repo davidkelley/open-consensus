@@ -74,7 +74,9 @@ export function Prompt({
           {busy ? '… ' : '› '}
         </Text>
         <Text>{value}</Text>
-        {busy ? null : <Text backgroundColor={theme.brand}> </Text>}
+        {/* A FOREGROUND glyph (not a background block) so the cursor stays visible
+            under NO_COLOR / background-stripping terminals. */}
+        {busy ? null : <Text color={theme.brand}>▎</Text>}
       </Box>
       {suggestions.length > 0 ? (
         <Box flexDirection="column" marginLeft={2}>

@@ -1,6 +1,6 @@
 import { Box } from 'ink'
 import { render } from 'ink-testing-library'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunTimeline } from '../session/timeline'
 import { RunTimelineView } from './RunTimeline'
 
@@ -55,4 +55,25 @@ describe('RunTimelineView', () => {
     expect(frame).toContain('run ')
     expect(frame).toContain('running')
   })
+
+  it('starts a spinner interval for a running run and clears it on unmount', () => {
+    const setSpy = vi.spyOn(globalThis, 'setInterval')
+    const clearSpy = vi.spyOn(globalThis, 'clearInterval')
+    const { unmount } = render(<RunTimelineView timeline={TIMELINE} status="open" />)
+    expect(setSpy).toHaveBeenCalledTimes(1) // TIMELINE is running (agent b)
+    unmount()
+    expect(clearSpy).toHaveBeenCalled() // cleared on unmount — no leak
+  })
+
+  it('does NOT start an interval for a terminal run', () => {
+    const setSpy = vi.spyOn(globalThis, 'setInterval')
+    const done: RunTimeline = { ...TIMELINE, done: true, verdict: 'met' }
+    const { unmount } = render(<RunTimelineView timeline={done} status="open" />)
+    expect(setSpy).not.toHaveBeenCalled()
+    unmount()
+  })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })

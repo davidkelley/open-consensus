@@ -1,9 +1,12 @@
 import { Box, Text } from 'ink'
-import type { ReactElement } from 'react'
+import { type ReactElement, useEffect, useState } from 'react'
 import type { StreamStatus } from '../session/sse'
-import { type RunTimeline, timelineRows } from '../session/timeline'
+import { type RunTimeline, isTerminal, timelineRows } from '../session/timeline'
 import { theme, timelineBorderColor } from '../theme'
 import { SegmentLine } from '../ui/SegmentLine'
+
+/** Spinner cadence (ms) — slow enough to read as a heartbeat, not a strobe. */
+const SPINNER_MS = 120
 
 /**
  * The in-progress run region (plan D19, restyled in tui-brand-polish). Renders the
@@ -18,8 +21,20 @@ export function RunTimelineView({
   timeline: RunTimeline | undefined
   status: StreamStatus | undefined
 }): ReactElement | null {
+  // Hooks run unconditionally (before the early return) per the rules of hooks.
+  const [frame, setFrame] = useState(0)
+  const running = timeline !== undefined && !isTerminal(timeline)
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(() => setFrame((f) => f + 1), SPINNER_MS)
+    // `running` is the only dep: the cleanup clears the interval on unmount AND the
+    // moment the run goes terminal (running → false), so it never outlives its run.
+    // A new run starting (still running) just keeps the one spinner going — no leak.
+    return () => clearInterval(id)
+  }, [running])
+
   if (!timeline) return null
-  const rows = timelineRows(timeline)
+  const rows = timelineRows(timeline, frame)
   return (
     <Box
       flexDirection="column"
