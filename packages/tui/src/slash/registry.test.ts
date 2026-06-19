@@ -121,8 +121,11 @@ describe('slash registry', () => {
       ['add', 'a', '--adapter', 'claude'],
       'add a --adapter claude',
     )
-    // a freshly added agent id is success-green
-    expect(captured[0]?.some((s) => s.color === theme.success)).toBe(true)
+    // the agent-id token specifically (not surrounding text) is success-green + bold
+    const idSeg = captured[0]?.[1]
+    expect(idSeg?.text).toBe("'a'")
+    expect(idSeg?.color).toBe(theme.success)
+    expect(idSeg?.bold).toBe(true)
   })
 
   it('agents: empty then populated; agent add/test/remove', async () => {
