@@ -1,11 +1,18 @@
 import { homedir } from 'node:os'
+import { sep } from 'node:path'
 import { theme } from '../theme'
 import { type Segment, seg } from './segments'
 
-/** Abbreviate the home directory prefix to `~` for a tidy banner. */
+/**
+ * Abbreviate the home directory prefix to `~` for a tidy banner. Matches only on a
+ * path boundary (home itself, or `home/…`) so a sibling like `/Users/davidkelley`
+ * is NOT mangled to `~kelley` when home is `/Users/david`.
+ */
 function tildify(path: string): string {
   const home = homedir()
-  return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path
+  if (!home) return path
+  if (path === home) return '~'
+  return path.startsWith(home + sep) ? `~${path.slice(home.length)}` : path
 }
 
 /**

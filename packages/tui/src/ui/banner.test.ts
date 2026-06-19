@@ -33,6 +33,17 @@ describe('bannerLines', () => {
     expect(text).not.toContain(homedir())
   })
 
+  it('abbreviates the home directory itself to a bare ~', () => {
+    const text = flat(bannerLines({ cwd: homedir() }))
+    expect(text).toContain('~')
+    expect(text).not.toContain(`${homedir()}/`)
+  })
+
+  it('does NOT abbreviate a sibling path that merely shares the home prefix', () => {
+    const sibling = `${homedir()}-sibling` // e.g. /Users/david-sibling when home is /Users/david
+    expect(flat(bannerLines({ cwd: sibling }))).toContain(sibling)
+  })
+
   it('includes a hint line with the key commands', () => {
     const text = flat(bannerLines())
     expect(text).toContain('/help')

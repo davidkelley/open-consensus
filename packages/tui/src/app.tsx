@@ -33,7 +33,8 @@ export interface AppProps {
   cwd?: string
 }
 
-/** Persistent one-line key hint under the prompt. */
+/** One-line key hint shown under the prompt when idle (the busy indicator takes
+ *  its place while a command runs). */
 export const FOOTER_HINT = '/help · Tab completes · ↑↓ history · Ctrl+C cancels/quits'
 
 /**
