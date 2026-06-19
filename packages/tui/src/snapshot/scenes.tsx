@@ -31,7 +31,7 @@ export interface Scene {
 
 /** A real-shaped run id (randomUUID) so the snapshots expose the UUID-length defect
  *  that the short `r-7f3a` fixtures hide. */
-const REAL_RUN_ID = '2f9a1c7e-3b4d-4e5f-8a6b-1c2d3e4f5a6b'
+export const REAL_RUN_ID = '2f9a1c7e-3b4d-4e5f-8a6b-1c2d3e4f5a6b'
 
 const transcriptLines: TranscriptLine[] = [
   {

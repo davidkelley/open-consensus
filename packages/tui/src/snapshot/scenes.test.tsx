@@ -1,6 +1,6 @@
 import { render } from 'ink-testing-library'
 import { describe, expect, it } from 'vitest'
-import { type Scene, scenes } from './scenes'
+import { REAL_RUN_ID, type Scene, scenes } from './scenes'
 
 describe('snapshot scenes', () => {
   it('exposes a named scene catalog', () => {
@@ -37,6 +37,7 @@ describe('snapshot scenes', () => {
       'error',
       'abandoned',
       'nocolor-timeline',
+      'nocolor-prompt',
     ]) {
       expect(byName.has(name)).toBe(true)
     }
@@ -45,7 +46,7 @@ describe('snapshot scenes', () => {
     expect(byName.get('nocolor-timeline')?.noColor).toBe(true)
     // Stage-1 fixtures intentionally use the RAW UUID (not a short id yet).
     const runs = render((byName.get('runs-list') as Scene).node)
-    expect(runs.lastFrame()).toContain('2f9a1c7e-3b4d-4e5f-8a6b-1c2d3e4f5a6b')
+    expect(runs.lastFrame()).toContain(REAL_RUN_ID)
     runs.unmount()
     const empty = render((byName.get('empty-states') as Scene).node)
     expect(empty.lastFrame()).toContain('no agents configured')

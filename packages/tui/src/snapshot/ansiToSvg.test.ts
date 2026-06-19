@@ -13,6 +13,13 @@ describe('stripAnsi', () => {
   it('preserves plain text and newlines unchanged', () => {
     expect(stripAnsi('one\ntwo')).toBe('one\ntwo')
   })
+
+  it('strips private-mode + non-letter-final CSI sequences (no raw ESC leaks)', () => {
+    const s = `${esc('[?25l')}hi${esc('[6n')}${esc('[2J')} x`
+    const out = stripAnsi(s)
+    expect(out).toBe('hi x')
+    expect(out).not.toContain(ESC)
+  })
 })
 
 describe('ansiFrameToSvg', () => {
@@ -112,6 +119,12 @@ describe('ansiFrameToSvg', () => {
   it('ignores non-SGR CSI sequences (e.g. cursor moves)', () => {
     const svg = ansiFrameToSvg(`${esc('[2J')}kept`)
     expect(svg).toContain('>kept</text>')
+  })
+
+  it('consumes private-mode sequences without leaking a raw ESC into the SVG', () => {
+    const svg = ansiFrameToSvg(`${esc('[?25l')}shown${esc('[?25h')}`)
+    expect(svg).toContain('>shown</text>')
+    expect(svg).not.toContain(ESC) // a raw ESC (0x1B) would be invalid XML
   })
 
   it('skips emitting text for blank default runs but keeps the svg valid', () => {

@@ -145,9 +145,11 @@ interface Run {
   style: Style
 }
 
-// Any CSI escape: ESC [ <params> <final letter>. Only `m` (SGR) changes style;
-// other finals (cursor moves etc.) are consumed and ignored.
-const CSI_SOURCE = `${String.fromCharCode(27)}\\[([0-9;]*)([A-Za-z])`
+// Any CSI escape: ESC [ <param bytes 0x30-0x3F> <intermediate bytes 0x20-0x2F>
+// <final byte 0x40-0x7E>. Covers the FULL grammar (incl. private-mode `?` forms
+// like ESC[?25l) so no raw ESC can leak into the SVG (invalid XML) or survive
+// stripAnsi. Only `m` (SGR) changes style; every other final is consumed + ignored.
+const CSI_SOURCE = `${String.fromCharCode(27)}\\[([0-9:;<=>?]*)([ -/]*)([@-~])`
 
 /**
  * Strip all CSI escape sequences from a frame — simulates a NO_COLOR / chalk
@@ -174,7 +176,7 @@ function parseLine(line: string, initial: Style): { runs: Run[]; end: Style } {
   let m = csi.exec(line)
   while (m !== null) {
     push(line.slice(last, m.index))
-    if (m[2] === 'm') {
+    if (m[3] === 'm') {
       const body = m[1] ?? ''
       const params = body === '' ? [0] : body.split(';').map((x) => Number(x) || 0)
       style = applySgr(style, params)
