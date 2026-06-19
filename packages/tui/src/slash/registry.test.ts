@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { type Adapter, createAdapter } from '@open-consensus/adapters'
+import { addAgentCommand } from '@open-consensus/command-core'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { theme } from '../theme'
 import type { Segment } from '../ui/segments'
@@ -20,6 +21,7 @@ let active: boolean
 let server: Server
 let endpoint: string
 let ctx: SlashContext
+let runsEmpty: boolean
 
 function registry(): Map<string, Adapter> {
   return new Map<string, Adapter>([
@@ -38,7 +40,8 @@ function startServer(): Promise<void> {
     if (url === '/health') return send(200, { ok: true, pid: process.pid })
     if (req.method === 'POST' && url === '/runs') return send(200, { runId: 'r1', roundId: 'rd1' })
     if (url.startsWith('/runs')) {
-      return send(200, { runs: [{ runId: 'r1', panelId: 'p', state: 'running', createdAt: 0 }] })
+      const runs = runsEmpty ? [] : [{ runId: 'r1', panelId: 'p', state: 'running', createdAt: 0 }]
+      return send(200, { runs })
     }
     send(404, { error: 'nope' })
   })
@@ -65,6 +68,7 @@ beforeEach(async () => {
   viewed = []
   quit = 0
   active = false
+  runsEmpty = false
   await startServer()
   writeFileSync(
     join(dir, 'discovery.json'),
@@ -97,10 +101,12 @@ describe('slash registry', () => {
     )
   })
 
-  it('/help lists every command', async () => {
+  it('/help lists every command plus a concepts line', async () => {
     await dispatch('help')
-    expect(out.length).toBe(SLASH_COMMANDS.length)
+    expect(out.length).toBe(SLASH_COMMANDS.length + 1) // commands + the concepts line
     expect(out.join('\n')).toMatch(/\/run/)
+    expect(out.join('\n')).toMatch(/panel = a group of agents/)
+    expect(out.join('\n')).toMatch(/verdict: met \/ degraded \/ failed/)
   })
 
   it('styles output: brand usage + dim summary for /help, red errors, green created', async () => {
@@ -126,6 +132,23 @@ describe('slash registry', () => {
     expect(idSeg?.text).toBe("'a'")
     expect(idSeg?.color).toBe(theme.success)
     expect(idSeg?.bold).toBe(true)
+  })
+
+  it('empty /agents guides the next step', async () => {
+    await dispatch('agents')
+    expect(out).toContain('no agents configured')
+    expect(out.join('\n')).toMatch(/add one with .*\/agent add/) // actionable hint
+  })
+
+  it('shows an agent model when one is configured', async () => {
+    await addAgentCommand(
+      ctx.configCtx,
+      { id: 'm', adapter: 'claude', model: 'opus' },
+      ctx.registry,
+    )
+    out.length = 0
+    await dispatch('agents')
+    expect(out.join('\n')).toMatch(/m {2}\(claude \/ opus\)/) // the model branch
   })
 
   it('agents: empty then populated; agent add/test/remove', async () => {
@@ -197,6 +220,13 @@ describe('slash registry', () => {
 
   it('rejects an unknown panel subcommand', async () => {
     await expect(dispatch('panel frob p')).rejects.toThrow(/unknown panel subcommand/)
+  })
+
+  it('empty /runs guides the next step', async () => {
+    runsEmpty = true
+    await dispatch('runs')
+    expect(out.join('\n')).toMatch(/no runs yet/)
+    expect(out.join('\n')).toMatch(/start one with .*\/run/)
   })
 
   it('/runs lists runs and /run starts + views', async () => {

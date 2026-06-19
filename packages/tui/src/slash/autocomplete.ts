@@ -16,10 +16,16 @@ export function autocomplete(line: string): Suggestion[] {
   if (!line.startsWith('/')) return []
   if (line.includes(' ')) return [] // past the command name, into args
   const prefix = line.slice(1).toLowerCase()
-  return SLASH_COMMANDS.filter((c) => c.name.startsWith(prefix)).map((c) => ({
-    value: `/${c.name}`,
-    summary: c.summary,
-  }))
+  return SLASH_COMMANDS.filter((c) => c.name.startsWith(prefix))
+    .sort((a, b) => {
+      // Relevance, not definition order: an exact match first, then the shortest
+      // name (so `/r` completes `/run` before `/runs`), then alphabetical.
+      const exact = Number(b.name === prefix) - Number(a.name === prefix)
+      if (exact !== 0) return exact
+      if (a.name.length !== b.name.length) return a.name.length - b.name.length
+      return a.name.localeCompare(b.name)
+    })
+    .map((c) => ({ value: `/${c.name}`, summary: c.summary }))
 }
 
 /**

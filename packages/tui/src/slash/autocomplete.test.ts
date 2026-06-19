@@ -14,8 +14,13 @@ describe('autocomplete', () => {
     expect(values).toContain('/quit')
   })
 
-  it('prefix-matches case-insensitively', () => {
-    expect(autocomplete('/PA').map((s) => s.value)).toEqual(['/panels', '/panel'])
+  it('prefix-matches case-insensitively, shortest name first', () => {
+    expect(autocomplete('/PA').map((s) => s.value)).toEqual(['/panel', '/panels'])
+  })
+
+  it('ranks by relevance: exact then shortest (/r → /run before /runs)', () => {
+    expect(autocomplete('/r').map((s) => s.value)).toEqual(['/run', '/runs'])
+    expect(autocomplete('/run')[0]?.value).toBe('/run') // exact match wins
   })
 
   it('stops suggesting once into the arguments', () => {

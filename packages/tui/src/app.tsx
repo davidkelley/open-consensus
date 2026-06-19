@@ -34,8 +34,9 @@ export interface AppProps {
 }
 
 /** One-line key hint shown under the prompt when idle (the busy indicator takes
- *  its place while a command runs). */
-export const FOOTER_HINT = '/help · Tab completes · ↑↓ history · Ctrl+C cancels/quits'
+ *  its place while a command runs). Keys only — the banner carries /help + /run, so
+ *  the two surfaces don't restate the same guidance. */
+export const FOOTER_HINT = 'Tab completes · ↑↓ history · Ctrl+C cancels/quits'
 
 /**
  * The claude-code-style slash-command TUI (plan D19). Finalized lines live in the

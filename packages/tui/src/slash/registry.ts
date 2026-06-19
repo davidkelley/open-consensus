@@ -68,6 +68,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
           seg(c.summary, { dim: true }),
         ])
       }
+      // One line that introduces the consensus vocabulary at the point of help.
+      ctx.print([
+        seg(
+          'panel = a group of agents · quorum = agreements needed · verdict: met / degraded / failed',
+          { dim: true },
+        ),
+      ])
     },
   },
   {
@@ -76,7 +83,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     usage: '/agents',
     async run(ctx) {
       const agents = listAgentsCommand(ctx.configCtx)
-      if (agents.length === 0) return ctx.print([seg('no agents configured', { dim: true })])
+      if (agents.length === 0) {
+        ctx.print([seg('no agents configured', { dim: true })])
+        return ctx.print([
+          seg('  add one with ', { dim: true }),
+          seg('/agent add <id> --adapter <claude|codex|gemini|opencode>', { color: theme.brand }),
+        ])
+      }
       for (const a of agents) {
         ctx.print([
           seg(a.id, { bold: true }),
@@ -139,7 +152,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     usage: '/panels',
     async run(ctx) {
       const panels = listPanelsCommand(ctx.configCtx)
-      if (panels.length === 0) return ctx.print([seg('no panels configured', { dim: true })])
+      if (panels.length === 0) {
+        ctx.print([seg('no panels configured', { dim: true })])
+        return ctx.print([
+          seg('  create one with ', { dim: true }),
+          seg('/panel create <id> <agent,agent,…>', { color: theme.brand }),
+        ])
+      }
       for (const p of panels) {
         ctx.print([
           seg(p.id, { bold: true }),
@@ -189,7 +208,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     async run(ctx) {
       await ctx.ensureDaemon()
       const runs = await listRunsCommand(ctx.discoveryPath)
-      if (runs.length === 0) return ctx.print([seg('no runs', { dim: true })])
+      if (runs.length === 0) {
+        ctx.print([seg('no runs yet', { dim: true })])
+        return ctx.print([
+          seg('  start one with ', { dim: true }),
+          seg('/run <panel> <prompt>', { color: theme.brand }),
+        ])
+      }
       for (const r of runs) {
         ctx.print([
           seg(shortId(r.runId), { color: theme.accent }),

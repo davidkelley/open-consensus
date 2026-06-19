@@ -44,10 +44,10 @@ describe('bannerLines', () => {
     expect(flat(bannerLines({ cwd: sibling }))).toContain(sibling)
   })
 
-  it('includes a hint line with the key commands', () => {
+  it('includes a workflow hint (commands only; keybindings live in the footer)', () => {
     const text = flat(bannerLines())
     expect(text).toContain('/help')
     expect(text).toContain('/run <panel> <prompt>')
-    expect(text).toContain('Ctrl+C')
+    expect(text).not.toContain('Ctrl+C') // moved to FOOTER_HINT to avoid overlap
   })
 })

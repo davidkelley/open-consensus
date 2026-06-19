@@ -114,10 +114,22 @@ const abandonedTimeline: RunTimeline = {
 const emptyStateLines: TranscriptLine[] = [
   { id: 0, segments: [seg('› ', { color: theme.brandDim }), seg('/agents')] },
   { id: 1, segments: [seg('no agents configured', { dim: true })] },
-  { id: 2, segments: [seg('› ', { color: theme.brandDim }), seg('/panels')] },
-  { id: 3, segments: [seg('no panels configured', { dim: true })] },
-  { id: 4, segments: [seg('› ', { color: theme.brandDim }), seg('/runs')] },
-  { id: 5, segments: [seg('no runs', { dim: true })] },
+  {
+    id: 2,
+    segments: [
+      seg('  add one with ', { dim: true }),
+      seg('/agent add <id> --adapter <claude|codex|gemini|opencode>', { color: theme.brand }),
+    ],
+  },
+  { id: 3, segments: [seg('› ', { color: theme.brandDim }), seg('/runs')] },
+  { id: 4, segments: [seg('no runs yet', { dim: true })] },
+  {
+    id: 5,
+    segments: [
+      seg('  start one with ', { dim: true }),
+      seg('/run <panel> <prompt>', { color: theme.brand }),
+    ],
+  },
 ]
 
 const runsListLines: TranscriptLine[] = [
@@ -149,6 +161,17 @@ const helpLines: TranscriptLine[] = [
       ],
     }),
   ),
+  {
+    id: 99,
+    segments: [
+      seg(
+        'panel = a group of agents · quorum = agreements needed · verdict: met / degraded / failed',
+        {
+          dim: true,
+        },
+      ),
+    ],
+  },
 ]
 
 const errorLines: TranscriptLine[] = [

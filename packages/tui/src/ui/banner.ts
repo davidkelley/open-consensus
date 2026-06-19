@@ -33,13 +33,13 @@ export function bannerLines(opts: { version?: string; cwd?: string } = {}): Segm
     [seg('    multi-agent consensus execution', { dim: true })],
     [seg(`    ${cwd}`, { dim: true })],
     [seg('')],
+    // Orientation only (the WORKFLOW). Mechanical keybindings live in the persistent
+    // footer (app.tsx FOOTER_HINT) so the two don't restate /help + Ctrl+C.
     [
       seg('    /help', { color: theme.brand }),
       seg(' for commands · ', { dim: true }),
       seg('/run <panel> <prompt>', { color: theme.brand }),
-      seg(' to start · ', { dim: true }),
-      seg('Ctrl+C', { color: theme.brand }),
-      seg(' to cancel/quit', { dim: true }),
+      seg(' to start', { dim: true }),
     ],
   ]
 }
