@@ -72,6 +72,19 @@ describe('RunTimelineView', () => {
     expect(setSpy).not.toHaveBeenCalled()
     unmount()
   })
+
+  it('clears the spinner interval when the run transitions running → terminal', () => {
+    const clearSpy = vi.spyOn(globalThis, 'clearInterval')
+    const { rerender, unmount } = render(<RunTimelineView timeline={TIMELINE} status="open" />)
+    clearSpy.mockClear() // ignore anything during the initial mount
+    // re-render the SAME view with a now-completed run: `running` flips false, so the
+    // effect cleanup must clear the interval (it doesn't outlive the run).
+    rerender(
+      <RunTimelineView timeline={{ ...TIMELINE, done: true, verdict: 'met' }} status="open" />,
+    )
+    expect(clearSpy).toHaveBeenCalled()
+    unmount()
+  })
 })
 
 afterEach(() => {
