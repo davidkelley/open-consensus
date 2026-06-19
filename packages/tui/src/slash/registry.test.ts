@@ -194,6 +194,17 @@ describe('slash registry', () => {
     expect(out.join('\n')).toMatch(/unavailable/)
   })
 
+  it('empty /panels guides the next step', async () => {
+    await dispatch('panels')
+    expect(out).toContain('no panels configured')
+    expect(out.join('\n')).toMatch(/create one with .*\/panel create/) // actionable hint
+  })
+
+  it('empty /agents hint lists the actual registry adapters', async () => {
+    await dispatch('agents') // registry has claude + gemini
+    expect(out.join('\n')).toMatch(/--adapter <claude\|gemini>/)
+  })
+
   it('panels + panel create/set-quorum/remove', async () => {
     await dispatch('agent add a --adapter claude')
     await dispatch('agent add b --adapter claude')

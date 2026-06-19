@@ -23,6 +23,20 @@ describe('autocomplete', () => {
     expect(autocomplete('/run')[0]?.value).toBe('/run') // exact match wins
   })
 
+  it('orders bare-slash suggestions by length, then alphabetically (tie-break)', () => {
+    expect(autocomplete('/').map((s) => s.value)).toEqual([
+      '/run', // length 3
+      '/help',
+      '/quit',
+      '/runs', // length 4, alpha
+      '/agent',
+      '/panel', // length 5, alpha
+      '/agents',
+      '/daemon',
+      '/panels', // length 6, alpha
+    ])
+  })
+
   it('stops suggesting once into the arguments', () => {
     expect(autocomplete('/run ')).toEqual([])
   })

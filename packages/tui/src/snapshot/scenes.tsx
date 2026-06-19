@@ -118,13 +118,22 @@ const emptyStateLines: TranscriptLine[] = [
     id: 2,
     segments: [
       seg('  add one with ', { dim: true }),
-      seg('/agent add <id> --adapter <claude|codex|gemini|opencode>', { color: theme.brand }),
+      seg('/agent add <id> --adapter <claude|codex|gemini>', { color: theme.brand }),
     ],
   },
-  { id: 3, segments: [seg('› ', { color: theme.brandDim }), seg('/runs')] },
-  { id: 4, segments: [seg('no runs yet', { dim: true })] },
+  { id: 3, segments: [seg('› ', { color: theme.brandDim }), seg('/panels')] },
+  { id: 4, segments: [seg('no panels configured', { dim: true })] },
   {
     id: 5,
+    segments: [
+      seg('  create one with ', { dim: true }),
+      seg('/panel create <id> <agent,agent,…>', { color: theme.brand }),
+    ],
+  },
+  { id: 6, segments: [seg('› ', { color: theme.brandDim }), seg('/runs')] },
+  { id: 7, segments: [seg('no runs yet', { dim: true })] },
+  {
+    id: 8,
     segments: [
       seg('  start one with ', { dim: true }),
       seg('/run <panel> <prompt>', { color: theme.brand }),

@@ -6,7 +6,7 @@ import type { AdapterRegistry } from '@open-consensus/daemon'
 import type { EngineEvent } from '@open-consensus/engine'
 import { render } from 'ink-testing-library'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { App } from './app'
+import { App, FOOTER_HINT } from './app'
 import type { EventStream, EventStreamDeps } from './session/sse'
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms))
@@ -107,6 +107,12 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  it('FOOTER_HINT is keys-only (no /help — that lives in the banner — but keeps Ctrl+C)', () => {
+    expect(FOOTER_HINT).not.toContain('/help')
+    expect(FOOTER_HINT).toContain('Ctrl+C')
+    expect(FOOTER_HINT).toContain('Tab completes')
+  })
+
   it('renders the banner, footer hint, and a prompt', () => {
     const { lastFrame } = renderApp({ version: '9.9.9' })
     expect(lastFrame()).toContain('OPEN CONSENSUS') // branded wordmark

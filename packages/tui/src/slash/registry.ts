@@ -84,10 +84,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     async run(ctx) {
       const agents = listAgentsCommand(ctx.configCtx)
       if (agents.length === 0) {
+        // Reflect the ACTUAL available adapters (not a hardcoded list that could
+        // suggest an unavailable one).
+        const adapters = [...ctx.registry.keys()].join('|') || 'adapter'
         ctx.print([seg('no agents configured', { dim: true })])
         return ctx.print([
           seg('  add one with ', { dim: true }),
-          seg('/agent add <id> --adapter <claude|codex|gemini|opencode>', { color: theme.brand }),
+          seg(`/agent add <id> --adapter <${adapters}>`, { color: theme.brand }),
         ])
       }
       for (const a of agents) {
