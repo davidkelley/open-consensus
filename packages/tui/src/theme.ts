@@ -20,11 +20,11 @@ export const theme = {
   success: '#23d18b',
   /** Semantic: failure / refusal / error. */
   danger: '#f14c4c',
-  /** Semantic: caution / timeout / degraded / cancelled. */
-  warn: '#e3b341',
-  /** Accent for ids and values. */
-  accent: '#6cb6ff',
-  /** De-emphasised / secondary text. */
+  /** Semantic: caution / timeout / degraded / cancelled. AMBER — deliberately
+   *  distinct from the mustard brand so `◐ running` and `◴ timeout` differ by color,
+   *  not just glyph. */
+  warn: '#d9822b',
+  /** De-emphasised / secondary text (and run ids, which are noise — they recede). */
   muted: '#8b949e',
 } as const
 

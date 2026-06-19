@@ -220,7 +220,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       }
       for (const r of runs) {
         ctx.print([
-          seg(shortId(r.runId), { color: theme.accent }),
+          seg(shortId(r.runId), { color: theme.muted }),
           seg(`  ${r.state}`, { bold: true }),
           seg(`  panel=${r.panelId}`, { dim: true }),
         ])
@@ -242,7 +242,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       const result = await startRunCommand(ctx.discoveryPath, { panel, prompt })
       ctx.print([
         seg('started run '),
-        seg(shortId(result.runId), { color: theme.accent, bold: true }),
+        seg(shortId(result.runId), { color: theme.muted, bold: true }),
         seg(` on panel '${panel}'`, { dim: true }),
       ])
       ctx.viewRun(result.runId)

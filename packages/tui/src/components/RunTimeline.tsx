@@ -41,6 +41,7 @@ export function RunTimelineView({
       borderStyle="round"
       borderColor={timelineBorderColor(timeline)}
       paddingX={1}
+      alignSelf="flex-start" // hug the content instead of spanning the whole terminal
     >
       {rows.map((row, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional + fully re-rendered each tick

@@ -210,7 +210,7 @@ export function App(props: AppProps): ReactElement {
         <Prompt onSubmit={handleSubmit} busy={busy} />
       </Box>
       {busy ? (
-        <Text color={theme.brandDim}>● working…</Text>
+        <Text color={theme.brandDim}>◆ working…</Text>
       ) : (
         <Text color={theme.muted}>{FOOTER_HINT}</Text>
       )}

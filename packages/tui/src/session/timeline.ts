@@ -108,16 +108,18 @@ export function shortId(id: string): string {
   return id.slice(0, 8)
 }
 
-const STATUS_MARK: Record<AgentTimelineStatus, string> = {
+// Every mark is width-1 (a test asserts it) so the agent rows stay column-aligned —
+// `⌛` (wide) and `⚠` (emoji-presentation, ambiguous width) were swapped for `◴`/`▲`.
+export const STATUS_MARK: Record<AgentTimelineStatus, string> = {
   pending: '·',
   running: '◐',
   ok: '✓',
   refusal: '✗',
-  timeout: '⌛',
+  timeout: '◴',
   error: '✗',
   unavailable: '∅',
   cancelled: '⊘',
-  interrupted: '⚠',
+  interrupted: '▲',
 }
 
 // Liveness spinner cycled on the `running` mark so a slow round reads as alive, not
@@ -134,13 +136,13 @@ export function spinnerMark(frame: number): string {
  * Render the timeline to styled segment-rows (plan tui-brand-polish). The live
  * region and the committed handoff both use this so a running and a finished run
  * look identical. Pure, with semantic color from {@link statusColor}/
- * {@link verdictColor}. Run ids use the shared accent color (matching the `/run`
- * and `/runs` command output).
+ * {@link verdictColor}. Run ids render in `muted` (they're noise — they recede),
+ * matching the `/run` and `/runs` command output.
  */
 export function timelineRows(t: RunTimeline, frame = 0): Segment[][] {
   const head: Segment[] = [
     seg('run ', { dim: true }),
-    seg(shortId(t.runId), { color: theme.accent }),
+    seg(shortId(t.runId), { color: theme.muted }),
     seg('  round ', { dim: true }),
     seg(String(t.roundIndex), { bold: true }),
   ]

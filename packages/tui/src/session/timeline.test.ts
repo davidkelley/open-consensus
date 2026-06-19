@@ -1,8 +1,10 @@
 import type { EngineEvent } from '@open-consensus/engine'
+import stringWidth from 'string-width'
 import { describe, expect, it } from 'vitest'
 import { theme } from '../theme'
 import {
   type RunTimeline,
+  STATUS_MARK,
   applyEvent,
   emptyTimeline,
   shortId,
@@ -80,7 +82,7 @@ describe('timeline reducer', () => {
 describe('timelineRows', () => {
   const flat = (segs: { text: string }[]): string => segs.map((s) => s.text).join('')
 
-  it('colors the accent run id and a running header', () => {
+  it('colors the muted run id and a running header', () => {
     const t: RunTimeline = {
       runId: 'r9',
       roundIndex: 2,
@@ -90,7 +92,7 @@ describe('timelineRows', () => {
     }
     const rows = timelineRows(t)
     expect(flat(rows[0] ?? [])).toBe('run r9  round 2 — running')
-    expect((rows[0] ?? []).some((s) => s.text === 'r9' && s.color === theme.accent)).toBe(true)
+    expect((rows[0] ?? []).some((s) => s.text === 'r9' && s.color === theme.muted)).toBe(true)
     // the agent mark carries the status color
     expect((rows[1] ?? [])[0]?.color).toBe(theme.brand) // running mark
     expect(flat(rows[1] ?? [])).toBe('  ◐ a: running')
@@ -175,5 +177,17 @@ describe('shortId', () => {
 describe('spinnerMark', () => {
   it('cycles the four frames and wraps', () => {
     expect([0, 1, 2, 3, 4, 5].map(spinnerMark)).toEqual(['◐', '◓', '◑', '◒', '◐', '◓'])
+  })
+})
+
+describe('mark widths', () => {
+  it('every status mark is exactly one column (keeps the agent rows aligned)', () => {
+    for (const [status, mark] of Object.entries(STATUS_MARK)) {
+      expect(stringWidth(mark), `mark for ${status} (${mark})`).toBe(1)
+    }
+  })
+
+  it('every spinner frame is one column wide', () => {
+    for (const f of [0, 1, 2, 3]) expect(stringWidth(spinnerMark(f))).toBe(1)
   })
 })

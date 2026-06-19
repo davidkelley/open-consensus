@@ -50,7 +50,7 @@ const transcriptLines: TranscriptLine[] = [
     id: 5,
     segments: [
       seg('started run '),
-      seg(shortId(REAL_RUN_ID), { color: theme.accent, bold: true }), // 8-char short id, as /run prints
+      seg(shortId(REAL_RUN_ID), { color: theme.muted, bold: true }), // 8-char short id, as /run prints
       seg(" on panel 'review'", { dim: true }),
     ],
   },
@@ -146,7 +146,7 @@ const runsListLines: TranscriptLine[] = [
   {
     id: 1,
     segments: [
-      seg(shortId(REAL_RUN_ID), { color: theme.accent }),
+      seg(shortId(REAL_RUN_ID), { color: theme.muted }),
       seg('  running', { bold: true }),
       seg('  panel=review', { dim: true }),
     ],
