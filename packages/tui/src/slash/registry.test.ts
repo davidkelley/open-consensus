@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { type Adapter, createAdapter } from '@open-consensus/adapters'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { theme } from '../theme'
+import type { Segment } from '../ui/segments'
 import { SLASH_COMMANDS, type SlashContext, findCommand } from './registry'
 
 const FAKE = fileURLToPath(new URL('../../../adapters/test/fixtures/fake-cli.mjs', import.meta.url))
@@ -99,6 +101,28 @@ describe('slash registry', () => {
     await dispatch('help')
     expect(out.length).toBe(SLASH_COMMANDS.length)
     expect(out.join('\n')).toMatch(/\/run/)
+  })
+
+  it('styles output: brand usage + dim summary for /help, red errors, green created', async () => {
+    // Capture raw segments (not flattened) so styling regressions are caught.
+    const captured: Segment[][] = []
+    const styled: SlashContext = {
+      ...ctx,
+      print: (l) => captured.push(typeof l === 'string' ? [{ text: l }] : l),
+    }
+    await (findCommand('help') as NonNullable<ReturnType<typeof findCommand>>).run(styled, [], '')
+    const helpRow = captured[0] ?? []
+    expect(helpRow[0]?.color).toBe(theme.brand) // usage column is brand
+    expect(helpRow[1]?.dim).toBe(true) // summary is dim
+
+    captured.length = 0
+    await (findCommand('agent') as NonNullable<ReturnType<typeof findCommand>>).run(
+      styled,
+      ['add', 'a', '--adapter', 'claude'],
+      'add a --adapter claude',
+    )
+    // a freshly added agent id is success-green
+    expect(captured[0]?.some((s) => s.color === theme.success)).toBe(true)
   })
 
   it('agents: empty then populated; agent add/test/remove', async () => {

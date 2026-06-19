@@ -77,8 +77,10 @@ const doneTimeline: RunTimeline = {
 
 const noop = (): void => {}
 
+// Illustrative fixed values — this scene shows what the banner LOOKS like, not the
+// real version (that flow is asserted in app.test.tsx: cli.ts → launchTui → App).
 const bannerTranscript: TranscriptLine[] = bannerLines({
-  version: '0.1.1',
+  version: '1.2.3',
   cwd: '/Users/dev/github.com/davidkelley/open-consensus',
 }).map((segments, id) => ({ id, segments }))
 

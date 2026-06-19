@@ -218,12 +218,19 @@ Acceptance criteria:
 
 ## Reviewer environment status
 
-- **Codex** — active.
-- **Gemini** — active.
-- **Grok** — DEGRADED (xAI spending-limit / no active subscription; HTTP 403). Consistent across prior
-  builds. Continuing without it per the consensus graceful-degradation rule.
-- **opencode** — DEGRADED (the auto-mode dispatch routes private-repo source to an external cloud model;
-  the sandbox classifier blocks that route). Continuing without it.
+- **Codex** — active throughout (returns inline for small diffs; backgrounds long plan/diff reviews —
+  those async results are not retrievable, so for large reviews only the inline ones land).
+- **Gemini** — active for the plan + Stages 1–4 stage reviews and most fix rounds; went DEGRADED during
+  the Stage-4 fix round 2 with `IneligibleTierError` ("no longer supported for Gemini Code Assist for
+  individuals; migrate to Antigravity") — the Gemini CLI's individual-tier cutoff lapsed (2026-06-18).
+  Unavailable for the Phase-3 final review.
+- **Grok** — DEGRADED for the entire build (xAI spending-limit / no active subscription; HTTP 403).
+- **opencode** — DEGRADED for the entire build (the auto-mode dispatch routes private-repo source to an
+  external cloud model; the sandbox classifier blocks that route).
+
+Net: by Phase 3 only **Codex** remained reachable. Per the graceful-degradation rule, the loop
+continued with the available reviewer(s) at each step; the final review leans on Codex plus the
+orchestrator's own cross-stage verification.
 
 ## Review log
 
@@ -236,6 +243,24 @@ Acceptance criteria:
   retrievable through available tooling (the rescue wrapper only *starts* tasks; the companion's
   result store is transient). Re-engaged at every stage review, where smaller diffs return inline.
 
+## Deviations from this plan (intentional, reviewed)
+
+- **`timelineLines` was removed**, not retained. The plan kept it for "text-only callers", but a
+  Stage-3 review found it had zero consumers once the committed handoff moved to `timelineRows`. Deleted
+  in `112b6e4` (prefer-simplicity; no consumer existed).
+- **The banner lives at `src/ui/banner.ts`, not `components/Banner.tsx`.** It returns pure data
+  (`Segment[][]`) seeded into state, not a React component, so it belongs next to `ui/segments.ts`.
+- **The colored timeline-handoff moved from Stage 4 to Stage 3** (Gemini plan-review finding) so Stage 3
+  did not ship half-styled.
+
 ## Reviewer pushback (rejected)
 
-_None yet._
+- **Final review (Codex): couple `ansiToSvg.ts` palette to `theme.ts`.** Rejected — that file's palette
+  is the standard ANSI terminal color table (it maps SGR codes 30–37/90–97 etc. to display colors so it
+  can render ANY ansi app), conceptually distinct from the brand theme; and it is dev-only/unshipped.
+- **Final review (Codex): restore `timelineLines` / move banner to `components/Banner.tsx`.** Rejected —
+  see "Deviations from this plan" above (both were deliberate, reviewed choices).
+- **Final review (Codex): snapshot scene hardcodes a version → drift.** Partially accepted — it is a
+  visual fixture, not a version check (the real flow is asserted in `app.test.tsx`); changed the literal
+  to an obviously-illustrative `1.2.3` with a clarifying comment instead of wiring a build version into
+  the dev tool.
