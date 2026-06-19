@@ -201,7 +201,7 @@ const noop = (): void => {}
 // real version (that flow is asserted in app.test.tsx: cli.ts → launchTui → App).
 const bannerTranscript: TranscriptLine[] = bannerLines({
   version: '1.2.3',
-  cwd: '/Users/dev/github.com/davidkelley/open-consensus',
+  cwd: '/Users/dev/projects/open-consensus',
 }).map((segments, id) => ({ id, segments }))
 
 export const scenes: Scene[] = [

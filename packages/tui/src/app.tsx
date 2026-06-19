@@ -49,14 +49,14 @@ export function App(props: AppProps): ReactElement {
   const ink = useApp()
   const doExit = props.exit ?? ink.exit
   // The banner is seeded via a lazy useState initializer (not a mount effect) so it
-  // appears exactly once and is React-19-StrictMode-safe. Bypassing the redaction
-  // sink is safe ONLY because the banner is built from static text + the version/cwd
-  // (no user-controlled content); every DYNAMIC line must still go through print(),
-  // which redacts. Do not seed dynamic/user content here.
+  // appears exactly once and is React-19-StrictMode-safe. It does NOT flow through
+  // print(), but its segments ARE redacted here so the cwd (the one env-derived part)
+  // can't leak a token-like path into scrollback — the redaction invariant holds for
+  // every transcript line, banner included. Every DYNAMIC line still goes via print().
   const [lines, setLines] = useState<TranscriptLine[]>(() =>
     bannerLines({ version: props.version, cwd: props.cwd }).map((segments, id) => ({
       id,
-      segments,
+      segments: redactSegments(segments, redactString),
     })),
   )
   // Next transcript id starts after the banner lines.

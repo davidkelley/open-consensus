@@ -17,11 +17,15 @@ describe('snapshot scenes', () => {
   })
 
   it('drives the autocomplete scene with its declared input', async () => {
-    const scene = scenes.find((s) => s.name === 'prompt-autocomplete') as Scene
-    expect(scene.input).toBe('/r')
-    const { stdin, lastFrame, unmount } = render(scene.node)
-    stdin.write(scene.input as string)
-    await new Promise((r) => setTimeout(r, 30))
+    const scene = scenes.find((s) => s.name === 'prompt-autocomplete')
+    expect(scene).toBeDefined() // fail clearly here if the scene is renamed/removed
+    expect(scene?.input).toBe('/r')
+    const { stdin, lastFrame, unmount } = render((scene as Scene).node)
+    stdin.write('/r')
+    // Poll until the suggestions render — no fixed-delay flake on slow runners.
+    for (let i = 0; i < 50 && !(lastFrame() ?? '').includes('/run'); i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
     expect(lastFrame()).toContain('/run')
     expect(lastFrame()).toContain('/runs')
     unmount()
