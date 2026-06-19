@@ -8,7 +8,7 @@ import { RunTimelineView } from './components/RunTimeline'
 import { Transcript, type TranscriptLine } from './components/Transcript'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
 import type { EventStream, EventStreamDeps } from './session/sse'
-import { isTerminal, timelineRows } from './session/timeline'
+import { isTerminal, shortId, timelineRows } from './session/timeline'
 import { parseLine } from './slash/parser'
 import { type SlashContext, findCommand } from './slash/registry'
 import { theme } from './theme'
@@ -87,9 +87,9 @@ export function App(props: AppProps): ReactElement {
       const cancel =
         props.cancelRun ??
         ((rid) => cancelRunCommand(props.discoveryPath, rid).then(() => undefined))
-      print([seg(`cancelling run ${id}… (Ctrl+C again to quit)`, { color: theme.warn })])
+      print([seg(`cancelling run ${shortId(id)}… (Ctrl+C again to quit)`, { color: theme.warn })])
       cancel(id)
-        .then(() => print([seg(`cancel requested for ${id}`, { dim: true })]))
+        .then(() => print([seg(`cancel requested for ${shortId(id)}`, { dim: true })]))
         .catch(() =>
           print([seg('cancel request failed — Ctrl+C again to quit', { color: theme.danger })]),
         )

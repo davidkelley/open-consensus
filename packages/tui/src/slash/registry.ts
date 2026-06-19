@@ -13,6 +13,7 @@ import {
   testAgentCommand,
 } from '@open-consensus/command-core'
 import type { AdapterRegistry } from '@open-consensus/daemon'
+import { shortId } from '../session/timeline'
 import { theme } from '../theme'
 import { type Segment, seg } from '../ui/segments'
 
@@ -191,7 +192,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       if (runs.length === 0) return ctx.print([seg('no runs', { dim: true })])
       for (const r of runs) {
         ctx.print([
-          seg(r.runId, { color: theme.accent }),
+          seg(shortId(r.runId), { color: theme.accent }),
           seg(`  ${r.state}`, { bold: true }),
           seg(`  panel=${r.panelId}`, { dim: true }),
         ])
@@ -213,7 +214,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       const result = await startRunCommand(ctx.discoveryPath, { panel, prompt })
       ctx.print([
         seg('started run '),
-        seg(result.runId, { color: theme.accent, bold: true }),
+        seg(shortId(result.runId), { color: theme.accent, bold: true }),
         seg(` on panel '${panel}'`, { dim: true }),
       ])
       ctx.viewRun(result.runId)

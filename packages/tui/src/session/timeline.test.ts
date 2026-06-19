@@ -1,7 +1,7 @@
 import type { EngineEvent } from '@open-consensus/engine'
 import { describe, expect, it } from 'vitest'
 import { theme } from '../theme'
-import { type RunTimeline, applyEvent, emptyTimeline, timelineRows } from './timeline'
+import { type RunTimeline, applyEvent, emptyTimeline, shortId, timelineRows } from './timeline'
 
 const RUN = 'run1'
 function reduce(events: EngineEvent[]): RunTimeline {
@@ -115,5 +115,34 @@ describe('timelineRows', () => {
     const head = flat(timelineRows(t)[0] ?? [])
     expect(head).toContain('— complete')
     expect(head).toContain('(abandoned)')
+  })
+
+  it('shortens a UUID run id in the header (display only)', () => {
+    const t: RunTimeline = {
+      runId: '2f9a1c7e-3b4d-4e5f-8a6b-1c2d3e4f5a6b',
+      roundIndex: 1,
+      agents: [{ agentId: 'a', status: 'ok', attempts: 1 }],
+      done: false,
+      abandoned: false,
+    }
+    const head = flat(timelineRows(t)[0] ?? [])
+    expect(head).toContain('run 2f9a1c7e ')
+    expect(head).not.toContain('2f9a1c7e-3b4d') // the full UUID is not shown
+  })
+
+  it('renders an explicit row for a round with no agents (not a silent stall)', () => {
+    const t: RunTimeline = { runId: 'r9', roundIndex: 0, agents: [], done: false, abandoned: false }
+    const rows = timelineRows(t)
+    expect(rows.length).toBe(2)
+    expect(flat(rows[1] ?? [])).toContain('(no agents in this round)')
+  })
+})
+
+describe('shortId', () => {
+  it('returns the first 8 chars of a UUID', () => {
+    expect(shortId('2f9a1c7e-3b4d-4e5f-8a6b-1c2d3e4f5a6b')).toBe('2f9a1c7e')
+  })
+  it('leaves an already-short id unchanged', () => {
+    expect(shortId('r9')).toBe('r9')
   })
 })

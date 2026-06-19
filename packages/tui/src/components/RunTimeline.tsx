@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import type { StreamStatus } from '../session/sse'
 import { type RunTimeline, timelineRows } from '../session/timeline'
 import { theme, timelineBorderColor } from '../theme'
+import { SegmentLine } from '../ui/SegmentLine'
 
 /**
  * The in-progress run region (plan D19, restyled in tui-brand-polish). Renders the
@@ -28,14 +29,7 @@ export function RunTimelineView({
     >
       {rows.map((row, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional + fully re-rendered each tick
-        <Box key={i}>
-          {row.map((s, j) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: segments are positional within a row
-            <Text key={j} color={s.color} bold={s.bold} dimColor={s.dim} inverse={s.inverse}>
-              {s.text}
-            </Text>
-          ))}
-        </Box>
+        <SegmentLine key={i} segments={row} />
       ))}
       {status !== undefined && status !== 'open' && !timeline.done ? (
         <Text color={theme.muted}> …{status}</Text>

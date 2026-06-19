@@ -1,5 +1,6 @@
-import { Box, Static, Text } from 'ink'
+import { Static } from 'ink'
 import type { ReactElement } from 'react'
+import { SegmentLine } from '../ui/SegmentLine'
 import type { Segment } from '../ui/segments'
 
 export interface TranscriptLine {
@@ -19,16 +20,7 @@ export interface TranscriptLine {
 export function Transcript({ lines }: { lines: TranscriptLine[] }): ReactElement {
   return (
     <Static items={lines}>
-      {(line) => (
-        <Box key={line.id}>
-          {line.segments.map((s, j) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: segments are positional within a committed line
-            <Text key={j} color={s.color} bold={s.bold} dimColor={s.dim} inverse={s.inverse}>
-              {s.text}
-            </Text>
-          ))}
-        </Box>
-      )}
+      {(line) => <SegmentLine key={line.id} segments={line.segments} />}
     </Static>
   )
 }

@@ -99,6 +99,15 @@ function patchAgent(
   return { ...timeline, agents }
 }
 
+/**
+ * Short, git-style display id (first 8 chars of the UUID). Display-only — the full
+ * UUID is always used on the machine path (the cancel RPC), so a cosmetic collision
+ * (negligible for a session's handful of runs) has no functional effect.
+ */
+export function shortId(id: string): string {
+  return id.slice(0, 8)
+}
+
 const STATUS_MARK: Record<AgentTimelineStatus, string> = {
   pending: '·',
   running: '◐',
@@ -121,7 +130,7 @@ const STATUS_MARK: Record<AgentTimelineStatus, string> = {
 export function timelineRows(t: RunTimeline): Segment[][] {
   const head: Segment[] = [
     seg('run ', { dim: true }),
-    seg(t.runId, { color: theme.accent }),
+    seg(shortId(t.runId), { color: theme.accent }),
     seg('  round ', { dim: true }),
     seg(String(t.roundIndex), { bold: true }),
   ]
@@ -137,6 +146,10 @@ export function timelineRows(t: RunTimeline): Segment[][] {
   }
   if (t.abandoned) head.push(seg(' (abandoned)', { color: theme.warn }))
 
+  // An empty round would otherwise render just a header and read as a silent stall.
+  if (t.agents.length === 0) {
+    return [head, [seg('  (no agents in this round)', { dim: true })]]
+  }
   const rows = t.agents.map((a): Segment[] => [
     seg(`  ${STATUS_MARK[a.status]} `, { color: statusColor(a.status) }),
     seg(a.agentId, { bold: true }),

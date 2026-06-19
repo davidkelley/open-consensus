@@ -27,7 +27,7 @@ describe('snapshot scenes', () => {
     unmount()
   })
 
-  it('includes the edge/robustness scenes with their fixtures (raw UUID baseline)', () => {
+  it('includes the edge/robustness scenes with their fixtures', () => {
     const byName = new Map(scenes.map((s) => [s.name, s]))
     for (const name of [
       'narrow-timeline',
@@ -44,9 +44,10 @@ describe('snapshot scenes', () => {
     // The narrow scene constrains width; the nocolor scene flags NO_COLOR.
     expect(byName.get('narrow-timeline')?.width).toBe(50)
     expect(byName.get('nocolor-timeline')?.noColor).toBe(true)
-    // Stage-1 fixtures intentionally use the RAW UUID (not a short id yet).
+    // /runs now shows the SHORT id (first 8), not the full UUID.
     const runs = render((byName.get('runs-list') as Scene).node)
-    expect(runs.lastFrame()).toContain(REAL_RUN_ID)
+    expect(runs.lastFrame()).toContain(REAL_RUN_ID.slice(0, 8))
+    expect(runs.lastFrame()).not.toContain(REAL_RUN_ID)
     runs.unmount()
     const empty = render((byName.get('empty-states') as Scene).node)
     expect(empty.lastFrame()).toContain('no agents configured')

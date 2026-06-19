@@ -4,7 +4,7 @@ import { FOOTER_HINT } from '../app'
 import { Prompt } from '../components/Prompt'
 import { RunTimelineView } from '../components/RunTimeline'
 import { Transcript, type TranscriptLine } from '../components/Transcript'
-import type { RunTimeline } from '../session/timeline'
+import { type RunTimeline, shortId } from '../session/timeline'
 import { theme } from '../theme'
 import { bannerLines } from '../ui/banner'
 import { seg } from '../ui/segments'
@@ -125,7 +125,7 @@ const runsListLines: TranscriptLine[] = [
   {
     id: 1,
     segments: [
-      seg(REAL_RUN_ID, { color: theme.accent }),
+      seg(shortId(REAL_RUN_ID), { color: theme.accent }),
       seg('  running', { bold: true }),
       seg('  panel=review', { dim: true }),
     ],
