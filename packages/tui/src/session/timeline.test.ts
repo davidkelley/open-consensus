@@ -1,6 +1,16 @@
 import type { EngineEvent } from '@open-consensus/engine'
+import stringWidth from 'string-width'
 import { describe, expect, it } from 'vitest'
-import { type RunTimeline, applyEvent, emptyTimeline, timelineLines } from './timeline'
+import { theme } from '../theme'
+import {
+  type RunTimeline,
+  STATUS_MARK,
+  applyEvent,
+  emptyTimeline,
+  shortId,
+  spinnerMark,
+  timelineRows,
+} from './timeline'
 
 const RUN = 'run1'
 function reduce(events: EngineEvent[]): RunTimeline {
@@ -67,33 +77,117 @@ describe('timeline reducer', () => {
     t = applyEvent(t, { type: 'run-readopted', runId: RUN })
     expect(t.abandoned).toBe(false)
   })
+})
 
-  it('renders lines with a header and per-agent rows', () => {
-    const t = reduce([
-      { type: 'round-started', runId: RUN, roundId: 'r0', index: 1, agentIds: ['a'] },
-      {
-        type: 'invocation-finished',
-        runId: RUN,
-        roundId: 'r0',
-        agentId: 'a',
-        status: 'ok',
-        attempts: 2,
-      },
-      { type: 'round-completed', runId: RUN, roundId: 'r0', verdict: 'met' },
-    ])
-    const lines = timelineLines(t)
-    expect(lines[0]).toMatch(/run run1 {2}round 1 — met/)
-    expect(lines[1]).toMatch(/✓ a: ok \(×2\)/)
+describe('timelineRows', () => {
+  const flat = (segs: { text: string }[]): string => segs.map((s) => s.text).join('')
+
+  it('colors the muted run id and a running header', () => {
+    const t: RunTimeline = {
+      runId: 'r9',
+      roundIndex: 2,
+      agents: [{ agentId: 'a', status: 'running', attempts: 1 }],
+      done: false,
+      abandoned: false,
+    }
+    const rows = timelineRows(t)
+    expect(flat(rows[0] ?? [])).toBe('run r9  round 2 — running')
+    expect((rows[0] ?? []).some((s) => s.text === 'r9' && s.color === theme.muted)).toBe(true)
+    // the agent mark carries the status color
+    expect((rows[1] ?? [])[0]?.color).toBe(theme.brand) // running mark
+    expect(flat(rows[1] ?? [])).toBe('  ◐ a: running')
   })
 
-  it('renders a running header before completion', () => {
-    const t = applyEvent(emptyTimeline(RUN), {
-      type: 'round-started',
-      runId: RUN,
-      roundId: 'r0',
-      index: 0,
-      agentIds: ['a'],
-    })
-    expect(timelineLines(t)[0]).toMatch(/— running/)
+  it('colors the verdict on a completed run and shows attempts', () => {
+    const t: RunTimeline = {
+      runId: 'r9',
+      roundIndex: 1,
+      agents: [{ agentId: 'a', status: 'ok', attempts: 2 }],
+      done: true,
+      verdict: 'met',
+      abandoned: false,
+    }
+    const rows = timelineRows(t)
+    expect(flat(rows[0] ?? [])).toBe('run r9  round 1 — met')
+    expect((rows[0] ?? []).some((s) => s.text === ' — met' && s.color === theme.success)).toBe(true)
+    expect(flat(rows[1] ?? [])).toBe('  ✓ a: ok (×2)')
+  })
+
+  it('falls back to "complete" with no verdict and marks abandoned', () => {
+    const t: RunTimeline = {
+      runId: 'r9',
+      roundIndex: 0,
+      agents: [],
+      done: true,
+      abandoned: true,
+    }
+    const head = flat(timelineRows(t)[0] ?? [])
+    expect(head).toContain('— complete')
+    expect(head).toContain('(abandoned — no orchestrator driving it)')
+  })
+
+  it('spins the running agent mark with the frame (others stay static)', () => {
+    const t: RunTimeline = {
+      runId: 'r9',
+      roundIndex: 1,
+      agents: [
+        { agentId: 'a', status: 'running', attempts: 1 },
+        { agentId: 'b', status: 'ok', attempts: 1 },
+      ],
+      done: false,
+      abandoned: false,
+    }
+    expect(flat(timelineRows(t, 0)[1] ?? [])).toBe('  ◐ a: running')
+    expect(flat(timelineRows(t, 1)[1] ?? [])).toBe('  ◓ a: running')
+    expect(flat(timelineRows(t, 2)[1] ?? [])).toBe('  ◑ a: running')
+    // a non-running agent is unaffected by the frame
+    expect(flat(timelineRows(t, 1)[2] ?? [])).toBe('  ✓ b: ok')
+  })
+
+  it('shortens a UUID run id in the header (display only)', () => {
+    const t: RunTimeline = {
+      runId: '2f9a1c7e-3b4d-4e5f-8a6b-1c2d3e4f5a6b',
+      roundIndex: 1,
+      agents: [{ agentId: 'a', status: 'ok', attempts: 1 }],
+      done: false,
+      abandoned: false,
+    }
+    const head = flat(timelineRows(t)[0] ?? [])
+    expect(head).toContain('run 2f9a1c7e ')
+    expect(head).not.toContain('2f9a1c7e-3b4d') // the full UUID is not shown
+  })
+
+  it('renders an explicit row for a round with no agents (not a silent stall)', () => {
+    const t: RunTimeline = { runId: 'r9', roundIndex: 0, agents: [], done: false, abandoned: false }
+    const rows = timelineRows(t)
+    expect(rows.length).toBe(2)
+    expect(flat(rows[1] ?? [])).toContain('(no agents in this round)')
+  })
+})
+
+describe('shortId', () => {
+  it('returns the first 8 chars of a UUID', () => {
+    expect(shortId('2f9a1c7e-3b4d-4e5f-8a6b-1c2d3e4f5a6b')).toBe('2f9a1c7e')
+  })
+  it('leaves an already-short id unchanged', () => {
+    expect(shortId('r9')).toBe('r9')
+  })
+})
+
+describe('spinnerMark', () => {
+  it('cycles the four frames and wraps', () => {
+    expect([0, 1, 2, 3, 4, 5].map(spinnerMark)).toEqual(['◐', '◓', '◑', '◒', '◐', '◓'])
+  })
+})
+
+describe('mark widths', () => {
+  it('every status mark is exactly one column (keeps the agent rows aligned)', () => {
+    for (const [status, mark] of Object.entries(STATUS_MARK)) {
+      expect(stringWidth(mark), `mark for ${status} (${mark})`).toBe(1)
+    }
+  })
+
+  it('every spinner frame is one column wide', () => {
+    for (const f of [0, 1, 2, 3]) expect(stringWidth(spinnerMark(f))).toBe(1)
   })
 })

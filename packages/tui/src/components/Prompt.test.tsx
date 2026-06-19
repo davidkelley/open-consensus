@@ -90,6 +90,15 @@ describe('Prompt', () => {
     expect(lastFrame()).toContain('›')
   })
 
+  it('shows a foreground cursor glyph when idle (NO_COLOR-safe), none when busy', () => {
+    const idle = render(<Prompt onSubmit={() => {}} busy={false} />)
+    expect(idle.lastFrame()).toContain('▎')
+    idle.unmount()
+    const busy = render(<Prompt onSubmit={() => {}} busy={true} />)
+    expect(busy.lastFrame()).not.toContain('▎')
+    busy.unmount()
+  })
+
   it('ignores input while busy', async () => {
     const { stdin, lastFrame } = render(<Prompt onSubmit={() => {}} busy={true} />)
     stdin.write('/help')

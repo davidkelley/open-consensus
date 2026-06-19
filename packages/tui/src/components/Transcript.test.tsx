@@ -1,14 +1,15 @@
 import { render } from 'ink-testing-library'
 import { describe, expect, it } from 'vitest'
+import { seg } from '../ui/segments'
 import { Transcript } from './Transcript'
 
 describe('Transcript', () => {
-  it('renders each finalized line', () => {
+  it('renders each finalized line from its segments', () => {
     const { lastFrame } = render(
       <Transcript
         lines={[
-          { id: 0, text: 'first line' },
-          { id: 1, text: 'second line' },
+          { id: 0, segments: [seg('first '), seg('line', { bold: true })] },
+          { id: 1, segments: [seg('second line', { dim: true })] },
         ]}
       />,
     )

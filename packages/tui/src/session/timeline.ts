@@ -1,4 +1,6 @@
 import type { EngineEvent } from '@open-consensus/engine'
+import { statusColor, theme, verdictColor } from '../theme'
+import { type Segment, seg } from '../ui/segments'
 
 /**
  * Pure reducer for a run's live consensus timeline (plan D19/D11). The TUI feeds
@@ -23,11 +25,13 @@ export interface AgentTimeline {
   attempts: number
 }
 
+export type RunVerdict = 'met' | 'degraded' | 'failed'
+
 export interface RunTimeline {
   runId: string
   roundIndex: number
   agents: AgentTimeline[]
-  verdict?: 'met' | 'degraded' | 'failed'
+  verdict?: RunVerdict
   done: boolean
   abandoned: boolean
 }
@@ -95,24 +99,78 @@ function patchAgent(
   return { ...timeline, agents }
 }
 
-const STATUS_MARK: Record<AgentTimelineStatus, string> = {
+/**
+ * Short, git-style display id (first 8 chars of the UUID). Display-only — the full
+ * UUID is always used on the machine path (the cancel RPC), so a cosmetic collision
+ * (negligible for a session's handful of runs) has no functional effect.
+ */
+export function shortId(id: string): string {
+  return id.slice(0, 8)
+}
+
+// Every mark is width-1 (a test asserts it) so the agent rows stay column-aligned —
+// `⌛` (wide) and `⚠` (emoji-presentation, ambiguous width) were swapped for `◴`/`▲`.
+export const STATUS_MARK: Record<AgentTimelineStatus, string> = {
   pending: '·',
   running: '◐',
   ok: '✓',
   refusal: '✗',
-  timeout: '⌛',
+  timeout: '◴',
   error: '✗',
   unavailable: '∅',
   cancelled: '⊘',
-  interrupted: '⚠',
+  interrupted: '▲',
 }
 
-/** Render the timeline to plain lines (committed to <Static> on completion). */
-export function timelineLines(t: RunTimeline): string[] {
-  const head = `run ${t.runId}  round ${t.roundIndex}${t.done ? ` — ${t.verdict ?? 'complete'}` : ' — running'}${t.abandoned ? ' (abandoned)' : ''}`
-  const rows = t.agents.map(
-    (a) =>
-      `  ${STATUS_MARK[a.status]} ${a.agentId}: ${a.status}${a.attempts > 1 ? ` (×${a.attempts})` : ''}`,
-  )
+// Liveness spinner cycled on the `running` mark so a slow round reads as alive, not
+// hung. A spinner (not a wall-clock timer) avoids needing a daemon start-timestamp
+// and is reconnect-safe (a reconnect just restarts the cycle).
+const SPINNER = ['◐', '◓', '◑', '◒'] as const
+
+/** The spinner glyph for a given frame (wraps). Pure — the live region holds the frame. */
+export function spinnerMark(frame: number): string {
+  return SPINNER[((frame % SPINNER.length) + SPINNER.length) % SPINNER.length] ?? '◐'
+}
+
+/**
+ * Render the timeline to styled segment-rows (plan tui-brand-polish). The live
+ * region and the committed handoff both use this so a running and a finished run
+ * look identical. Pure, with semantic color from {@link statusColor}/
+ * {@link verdictColor}. Run ids render in `muted` (they're noise — they recede),
+ * matching the `/run` and `/runs` command output.
+ */
+export function timelineRows(t: RunTimeline, frame = 0): Segment[][] {
+  const head: Segment[] = [
+    seg('run ', { dim: true }),
+    seg(shortId(t.runId), { color: theme.muted }),
+    seg('  round ', { dim: true }),
+    seg(String(t.roundIndex), { bold: true }),
+  ]
+  if (t.done) {
+    head.push(
+      seg(` — ${t.verdict ?? 'complete'}`, {
+        color: t.verdict ? verdictColor(t.verdict) : theme.success,
+        bold: true,
+      }),
+    )
+  } else {
+    head.push(seg(' — running', { color: theme.brand }))
+  }
+  if (t.abandoned)
+    head.push(seg(' (abandoned — no orchestrator driving it)', { color: theme.warn }))
+
+  // An empty round would otherwise render just a header and read as a silent stall.
+  if (t.agents.length === 0) {
+    return [head, [seg('  (no agents in this round)', { dim: true })]]
+  }
+  const rows = t.agents.map((a): Segment[] => [
+    // The running mark spins (frame from the live region); others are static.
+    seg(`  ${a.status === 'running' ? spinnerMark(frame) : STATUS_MARK[a.status]} `, {
+      color: statusColor(a.status),
+    }),
+    seg(a.agentId, { bold: true }),
+    seg(`: ${a.status}`, { dim: true }),
+    ...(a.attempts > 1 ? [seg(` (×${a.attempts})`, { dim: true })] : []),
+  ])
   return [head, ...rows]
 }

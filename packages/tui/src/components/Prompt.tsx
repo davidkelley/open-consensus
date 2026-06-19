@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from 'ink'
 import { type ReactElement, useState } from 'react'
 import { applySuggestion, autocomplete } from '../slash/autocomplete'
+import { theme } from '../theme'
 
 /**
  * The persistent bottom prompt (plan D19): a claude-code-style input with
@@ -69,16 +70,23 @@ export function Prompt({
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color="cyan">{busy ? '… ' : '› '}</Text>
+        <Text color={theme.brand} bold>
+          {busy ? '… ' : '› '}
+        </Text>
         <Text>{value}</Text>
-        {busy ? null : <Text inverse> </Text>}
+        {/* A FOREGROUND glyph (not a background block) so the cursor stays visible
+            under NO_COLOR / background-stripping terminals. */}
+        {busy ? null : <Text color={theme.brand}>▎</Text>}
       </Box>
       {suggestions.length > 0 ? (
         <Box flexDirection="column" marginLeft={2}>
-          {suggestions.slice(0, 6).map((s) => (
-            <Text key={s.value} dimColor>
-              {s.value.padEnd(12)} {s.summary}
-            </Text>
+          {suggestions.slice(0, 6).map((s, i) => (
+            <Box key={s.value}>
+              <Text color={i === 0 ? theme.brandBright : theme.brand} bold={i === 0}>
+                {(i === 0 ? '▸ ' : '  ') + s.value.padEnd(10)}
+              </Text>
+              <Text dimColor> {s.summary}</Text>
+            </Box>
           ))}
         </Box>
       ) : null}

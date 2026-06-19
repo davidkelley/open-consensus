@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { type Adapter, createAdapter } from '@open-consensus/adapters'
+import { addAgentCommand } from '@open-consensus/command-core'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { theme } from '../theme'
+import type { Segment } from '../ui/segments'
 import { SLASH_COMMANDS, type SlashContext, findCommand } from './registry'
 
 const FAKE = fileURLToPath(new URL('../../../adapters/test/fixtures/fake-cli.mjs', import.meta.url))
@@ -18,6 +21,7 @@ let active: boolean
 let server: Server
 let endpoint: string
 let ctx: SlashContext
+let runsEmpty: boolean
 
 function registry(): Map<string, Adapter> {
   return new Map<string, Adapter>([
@@ -36,7 +40,8 @@ function startServer(): Promise<void> {
     if (url === '/health') return send(200, { ok: true, pid: process.pid })
     if (req.method === 'POST' && url === '/runs') return send(200, { runId: 'r1', roundId: 'rd1' })
     if (url.startsWith('/runs')) {
-      return send(200, { runs: [{ runId: 'r1', panelId: 'p', state: 'running', createdAt: 0 }] })
+      const runs = runsEmpty ? [] : [{ runId: 'r1', panelId: 'p', state: 'running', createdAt: 0 }]
+      return send(200, { runs })
     }
     send(404, { error: 'nope' })
   })
@@ -63,6 +68,7 @@ beforeEach(async () => {
   viewed = []
   quit = 0
   active = false
+  runsEmpty = false
   await startServer()
   writeFileSync(
     join(dir, 'discovery.json'),
@@ -72,7 +78,9 @@ beforeEach(async () => {
     configCtx: { configFile: join(dir, 'config.json') },
     registry: registry(),
     discoveryPath: join(dir, 'discovery.json'),
-    print: (l) => out.push(l),
+    // Flatten styled segments back to plain text for assertions (the styling is
+    // covered elsewhere; here we only care about the content the commands emit).
+    print: (l) => out.push(typeof l === 'string' ? l : l.map((s) => s.text).join('')),
     ensureDaemon: async () => undefined,
     viewRun: (id) => viewed.push(id),
     hasActiveRun: () => active,
@@ -93,10 +101,54 @@ describe('slash registry', () => {
     )
   })
 
-  it('/help lists every command', async () => {
+  it('/help lists every command plus a concepts line', async () => {
     await dispatch('help')
-    expect(out.length).toBe(SLASH_COMMANDS.length)
+    expect(out.length).toBe(SLASH_COMMANDS.length + 1) // commands + the concepts line
     expect(out.join('\n')).toMatch(/\/run/)
+    expect(out.join('\n')).toMatch(/panel = a group of agents/)
+    expect(out.join('\n')).toMatch(/verdict: met \/ degraded \/ failed/)
+  })
+
+  it('styles output: brand usage + dim summary for /help, red errors, green created', async () => {
+    // Capture raw segments (not flattened) so styling regressions are caught.
+    const captured: Segment[][] = []
+    const styled: SlashContext = {
+      ...ctx,
+      print: (l) => captured.push(typeof l === 'string' ? [{ text: l }] : l),
+    }
+    await (findCommand('help') as NonNullable<ReturnType<typeof findCommand>>).run(styled, [], '')
+    const helpRow = captured[0] ?? []
+    expect(helpRow[0]?.color).toBe(theme.brand) // usage column is brand
+    expect(helpRow[1]?.dim).toBe(true) // summary is dim
+
+    captured.length = 0
+    await (findCommand('agent') as NonNullable<ReturnType<typeof findCommand>>).run(
+      styled,
+      ['add', 'a', '--adapter', 'claude'],
+      'add a --adapter claude',
+    )
+    // the agent-id token specifically (not surrounding text) is success-green + bold
+    const idSeg = captured[0]?.[1]
+    expect(idSeg?.text).toBe("'a'")
+    expect(idSeg?.color).toBe(theme.success)
+    expect(idSeg?.bold).toBe(true)
+  })
+
+  it('empty /agents guides the next step', async () => {
+    await dispatch('agents')
+    expect(out).toContain('no agents configured')
+    expect(out.join('\n')).toMatch(/add one with .*\/agent add/) // actionable hint
+  })
+
+  it('shows an agent model when one is configured', async () => {
+    await addAgentCommand(
+      ctx.configCtx,
+      { id: 'm', adapter: 'claude', model: 'opus' },
+      ctx.registry,
+    )
+    out.length = 0
+    await dispatch('agents')
+    expect(out.join('\n')).toMatch(/m {2}\(claude \/ opus\)/) // the model branch
   })
 
   it('agents: empty then populated; agent add/test/remove', async () => {
@@ -142,6 +194,17 @@ describe('slash registry', () => {
     expect(out.join('\n')).toMatch(/unavailable/)
   })
 
+  it('empty /panels guides the next step', async () => {
+    await dispatch('panels')
+    expect(out).toContain('no panels configured')
+    expect(out.join('\n')).toMatch(/create one with .*\/panel create/) // actionable hint
+  })
+
+  it('empty /agents hint lists the actual registry adapters', async () => {
+    await dispatch('agents') // registry has claude + gemini
+    expect(out.join('\n')).toMatch(/--adapter <claude\|gemini>/)
+  })
+
   it('panels + panel create/set-quorum/remove', async () => {
     await dispatch('agent add a --adapter claude')
     await dispatch('agent add b --adapter claude')
@@ -168,6 +231,25 @@ describe('slash registry', () => {
 
   it('rejects an unknown panel subcommand', async () => {
     await expect(dispatch('panel frob p')).rejects.toThrow(/unknown panel subcommand/)
+  })
+
+  it('empty /runs guides the next step', async () => {
+    runsEmpty = true
+    await dispatch('runs')
+    expect(out.join('\n')).toMatch(/no runs yet/)
+    expect(out.join('\n')).toMatch(/start one with .*\/run/)
+  })
+
+  it('colors the /runs run id muted (receded, not a second accent)', async () => {
+    const captured: Segment[][] = []
+    const styled: SlashContext = {
+      ...ctx,
+      print: (l) => captured.push(typeof l === 'string' ? [{ text: l }] : l),
+    }
+    await (findCommand('runs') as NonNullable<ReturnType<typeof findCommand>>).run(styled, [], '')
+    const idSeg = captured[0]?.[0] // the run-id token
+    expect(idSeg?.text).toBe('r1')
+    expect(idSeg?.color).toBe(theme.muted)
   })
 
   it('/runs lists runs and /run starts + views', async () => {

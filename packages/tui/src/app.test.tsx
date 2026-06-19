@@ -6,7 +6,7 @@ import type { AdapterRegistry } from '@open-consensus/daemon'
 import type { EngineEvent } from '@open-consensus/engine'
 import { render } from 'ink-testing-library'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { App } from './app'
+import { App, FOOTER_HINT } from './app'
 import type { EventStream, EventStreamDeps } from './session/sse'
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms))
@@ -107,10 +107,18 @@ afterEach(() => {
 })
 
 describe('App', () => {
-  it('renders the greeting and a prompt', () => {
-    const { lastFrame } = renderApp()
-    expect(lastFrame()).toContain('Open Consensus')
-    expect(lastFrame()).toContain('›')
+  it('FOOTER_HINT is keys-only (no /help — that lives in the banner — but keeps Ctrl+C)', () => {
+    expect(FOOTER_HINT).not.toContain('/help')
+    expect(FOOTER_HINT).toContain('Ctrl+C')
+    expect(FOOTER_HINT).toContain('Tab completes')
+  })
+
+  it('renders the banner, footer hint, and a prompt', () => {
+    const { lastFrame } = renderApp({ version: '9.9.9' })
+    expect(lastFrame()).toContain('OPEN CONSENSUS') // branded wordmark
+    expect(lastFrame()).toContain('v9.9.9') // version surfaced in the banner
+    expect(lastFrame()).toContain('›') // prompt glyph
+    expect(lastFrame()).toContain('Tab completes') // footer hint
   })
 
   it('dispatches a slash command and prints to the transcript', async () => {
@@ -291,6 +299,48 @@ describe('App', () => {
     expect(lastFrame()).not.toContain('SECRETSECRETSECRET')
   })
 
+  it('shows the brand busy indicator (◆ working…) while a command runs', async () => {
+    let release: () => void = () => undefined
+    const { stdin, lastFrame } = renderApp({
+      ensureDaemon: () =>
+        new Promise<void>((r) => {
+          release = r
+        }),
+    })
+    stdin.write('/runs') // /runs awaits ensureDaemon, so it stays busy until released
+    await tick()
+    stdin.write('\r')
+    await waitForFrame(lastFrame, '◆ working…')
+    expect(lastFrame()).toContain('◆ working…')
+    release()
+  })
+
+  it('renders a thrown command error in the transcript', async () => {
+    const { stdin, lastFrame } = renderApp()
+    stdin.write('/run p') // missing prompt -> the command throws before any RPC
+    await tick()
+    stdin.write('\r')
+    await waitForFrame(lastFrame, 'error: missing prompt')
+    expect(lastFrame()).toContain('error: missing prompt')
+  })
+
+  it('reports a failed cancel request', async () => {
+    const { stdin, lastFrame } = renderApp({
+      cancelRun: async () => {
+        throw new Error('boom')
+      },
+    })
+    stdin.write('/run p review this')
+    await tick()
+    stdin.write('\r')
+    await waitUntil(() => streamDeps !== undefined)
+    emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
+    await waitForFrame(lastFrame, 'a: pending')
+    stdin.write(CTRL_C)
+    await waitForFrame(lastFrame, 'cancel request failed')
+    expect(lastFrame()).toContain('cancel request failed')
+  })
+
   it('commits an abandoned run to scrollback (no orchestrator)', async () => {
     const { stdin, lastFrame } = renderApp()
     stdin.write('/run p review this')
@@ -300,7 +350,7 @@ describe('App', () => {
     emit({ type: 'round-started', runId: 'r1', roundId: 'rd1', index: 0, agentIds: ['a'] }, 1)
     await waitForFrame(lastFrame, 'a: pending')
     emit({ type: 'run-abandoned', runId: 'r1' }, 2)
-    await waitForFrame(lastFrame, '(abandoned)')
-    expect(lastFrame()).toContain('(abandoned)')
+    await waitForFrame(lastFrame, '(abandoned —')
+    expect(lastFrame()).toContain('(abandoned — no orchestrator driving it)')
   })
 })

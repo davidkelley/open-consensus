@@ -8,9 +8,12 @@ import { RunTimelineView } from './components/RunTimeline'
 import { Transcript, type TranscriptLine } from './components/Transcript'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
 import type { EventStream, EventStreamDeps } from './session/sse'
-import { isTerminal, timelineLines } from './session/timeline'
+import { isTerminal, shortId, timelineRows } from './session/timeline'
 import { parseLine } from './slash/parser'
 import { type SlashContext, findCommand } from './slash/registry'
+import { theme } from './theme'
+import { bannerLines } from './ui/banner'
+import { type Segment, redactSegments, seg, toSegments } from './ui/segments'
 
 export interface AppProps {
   configFile: string
@@ -24,10 +27,16 @@ export interface AppProps {
   startStream?: (deps: EventStreamDeps) => EventStream
   /** Exit override (defaults to ink's useApp().exit). */
   exit?: () => void
+  /** Release version shown in the banner (defaults to 'dev'). */
+  version?: string
+  /** Working directory shown in the banner (defaults to process.cwd()). */
+  cwd?: string
 }
 
-const GREETING =
-  'Open Consensus — type /help for commands, /run <panel> <prompt> to start, Ctrl+C to cancel/quit.'
+/** One-line key hint shown under the prompt when idle (the busy indicator takes
+ *  its place while a command runs). Keys only — the banner carries /help + /run, so
+ *  the two surfaces don't restate the same guidance. */
+export const FOOTER_HINT = 'Tab completes · ↑↓ history · Ctrl+C cancels/quits'
 
 /**
  * The claude-code-style slash-command TUI (plan D19). Finalized lines live in the
@@ -39,8 +48,19 @@ const GREETING =
 export function App(props: AppProps): ReactElement {
   const ink = useApp()
   const doExit = props.exit ?? ink.exit
-  const [lines, setLines] = useState<TranscriptLine[]>([{ id: 0, text: GREETING }])
-  const idRef = useRef(1)
+  // The banner is seeded via a lazy useState initializer (not a mount effect) so it
+  // appears exactly once and is React-19-StrictMode-safe. It does NOT flow through
+  // print(), but its segments ARE redacted here so the cwd (the one env-derived part)
+  // can't leak a token-like path into scrollback — the redaction invariant holds for
+  // every transcript line, banner included. Every DYNAMIC line still goes via print().
+  const [lines, setLines] = useState<TranscriptLine[]>(() =>
+    bannerLines({ version: props.version, cwd: props.cwd }).map((segments, id) => ({
+      id,
+      segments: redactSegments(segments, redactString),
+    })),
+  )
+  // Next transcript id starts after the banner lines.
+  const idRef = useRef(lines.length)
   const [runId, setRunId] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const committed = useRef<Set<string>>(new Set())
@@ -55,10 +75,10 @@ export function App(props: AppProps): ReactElement {
   // command result, or caught error produced the line (D10/D19). Stable across
   // renders; the id is read OUTSIDE the updater so React 19 StrictMode's
   // double-invoke can't skip ids.
-  const print = useCallback((text: string): void => {
+  const print = useCallback((line: string | Segment[]): void => {
     const id = idRef.current++
-    const safe = redactString(text)
-    setLines((prev) => [...prev, { id, text: safe }])
+    const segments = redactSegments(toSegments(line), redactString)
+    setLines((prev) => [...prev, { id, segments }])
   }, [])
 
   // Request a server-side cancel of a run (the daemon tree-kills the child and
@@ -68,10 +88,12 @@ export function App(props: AppProps): ReactElement {
       const cancel =
         props.cancelRun ??
         ((rid) => cancelRunCommand(props.discoveryPath, rid).then(() => undefined))
-      print(`cancelling run ${id}… (Ctrl+C again to quit)`)
+      print([seg(`cancelling run ${shortId(id)}… (Ctrl+C again to quit)`, { color: theme.warn })])
       cancel(id)
-        .then(() => print(`cancel requested for ${id}`))
-        .catch(() => print('cancel request failed — Ctrl+C again to quit'))
+        .then(() => print([seg(`cancel requested for ${shortId(id)}`, { dim: true })]))
+        .catch(() =>
+          print([seg('cancel request failed — Ctrl+C again to quit', { color: theme.danger })]),
+        )
     },
     [props.cancelRun, props.discoveryPath, print],
   )
@@ -89,7 +111,7 @@ export function App(props: AppProps): ReactElement {
   useEffect(() => {
     if (timeline && isTerminal(timeline) && !committed.current.has(timeline.runId)) {
       committed.current.add(timeline.runId)
-      for (const line of timelineLines(timeline)) print(line)
+      for (const row of timelineRows(timeline)) print(row)
       setRunId(undefined)
       cancelling.current = false // ready for the next run's Ctrl+C
     }
@@ -120,14 +142,18 @@ export function App(props: AppProps): ReactElement {
   const handleSubmit = (line: string): void => {
     const parsed = parseLine(line)
     if (parsed.kind === 'empty') return
-    print(`› ${line}`) // print() redacts at the sink (a pasted arg may carry a secret)
+    // print() redacts every segment at the sink (a pasted arg may carry a secret).
+    print([seg('› ', { color: theme.brandDim }), seg(line)])
     if (parsed.kind === 'text') {
-      print('not a command — type /help (every action is a /command)')
+      print([seg('not a command — type /help (every action is a /command)', { dim: true })])
       return
     }
     const command = findCommand(parsed.name)
     if (!command) {
-      print(`unknown command '/${parsed.name}' — type /help`)
+      print([
+        seg(`unknown command '/${parsed.name}'`, { color: theme.danger }),
+        seg(' — type /help', { dim: true }),
+      ])
       return
     }
     setBusy(true)
@@ -135,7 +161,13 @@ export function App(props: AppProps): ReactElement {
     if (isRun) startingRun.current = true
     command
       .run(ctx, parsed.args, parsed.rest)
-      .catch((err: unknown) => print(`error: ${err instanceof Error ? err.message : String(err)}`))
+      .catch((err: unknown) =>
+        print([
+          seg(`error: ${err instanceof Error ? err.message : String(err)}`, {
+            color: theme.danger,
+          }),
+        ]),
+      )
       .finally(() => {
         setBusy(false)
         if (isRun) {
@@ -164,7 +196,7 @@ export function App(props: AppProps): ReactElement {
       // the id arrives (viewRun), so the run isn't left orphaned on the daemon. A
       // second Ctrl+C still exits.
       cancelRequested.current = true
-      print('cancelling the starting run… (Ctrl+C again to quit)')
+      print([seg('cancelling the starting run… (Ctrl+C again to quit)', { color: theme.warn })])
       return
     }
     doExit()
@@ -177,7 +209,11 @@ export function App(props: AppProps): ReactElement {
       <Box marginTop={1}>
         <Prompt onSubmit={handleSubmit} busy={busy} />
       </Box>
-      {busy ? <Text dimColor>working…</Text> : null}
+      {busy ? (
+        <Text color={theme.brandDim}>◆ working…</Text>
+      ) : (
+        <Text color={theme.muted}>{FOOTER_HINT}</Text>
+      )}
     </Box>
   )
 }
