@@ -27,6 +27,31 @@ describe('snapshot scenes', () => {
     unmount()
   })
 
+  it('includes the edge/robustness scenes with their fixtures (raw UUID baseline)', () => {
+    const byName = new Map(scenes.map((s) => [s.name, s]))
+    for (const name of [
+      'narrow-timeline',
+      'empty-states',
+      'runs-list',
+      'help',
+      'error',
+      'abandoned',
+      'nocolor-timeline',
+    ]) {
+      expect(byName.has(name)).toBe(true)
+    }
+    // The narrow scene constrains width; the nocolor scene flags NO_COLOR.
+    expect(byName.get('narrow-timeline')?.width).toBe(50)
+    expect(byName.get('nocolor-timeline')?.noColor).toBe(true)
+    // Stage-1 fixtures intentionally use the RAW UUID (not a short id yet).
+    const runs = render((byName.get('runs-list') as Scene).node)
+    expect(runs.lastFrame()).toContain('2f9a1c7e-3b4d-4e5f-8a6b-1c2d3e4f5a6b')
+    runs.unmount()
+    const empty = render((byName.get('empty-states') as Scene).node)
+    expect(empty.lastFrame()).toContain('no agents configured')
+    empty.unmount()
+  })
+
   it('the timeline scenes show agents and verdict', () => {
     const running = scenes.find((s) => s.name === 'timeline-running')
     const done = scenes.find((s) => s.name === 'timeline-done')

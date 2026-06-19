@@ -149,6 +149,15 @@ interface Run {
 // other finals (cursor moves etc.) are consumed and ignored.
 const CSI_SOURCE = `${String.fromCharCode(27)}\\[([0-9;]*)([A-Za-z])`
 
+/**
+ * Strip all CSI escape sequences from a frame — simulates a NO_COLOR / chalk
+ * level-0 terminal (which emits no styling codes at all), so a snapshot of the
+ * stripped frame faithfully shows what a no-color terminal renders.
+ */
+export function stripAnsi(frame: string): string {
+  return frame.replace(new RegExp(CSI_SOURCE, 'g'), '')
+}
+
 /** Split one line (which may contain SGR escapes) into styled runs. */
 function parseLine(line: string, initial: Style): { runs: Run[]; end: Style } {
   const runs: Run[] = []

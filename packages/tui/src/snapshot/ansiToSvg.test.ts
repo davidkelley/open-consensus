@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { ansiFrameToSvg } from './ansiToSvg'
+import { ansiFrameToSvg, stripAnsi } from './ansiToSvg'
 
 const ESC = String.fromCharCode(27)
 const esc = (s: string): string => ESC + s
+
+describe('stripAnsi', () => {
+  it('removes color, bold, dim, and other CSI escapes (NO_COLOR proxy)', () => {
+    const styled = `${esc('[1m')}${esc('[38;2;215;161;74m')}hi${esc('[39m')}${esc('[22m')} there`
+    expect(stripAnsi(styled)).toBe('hi there')
+  })
+
+  it('preserves plain text and newlines unchanged', () => {
+    expect(stripAnsi('one\ntwo')).toBe('one\ntwo')
+  })
+})
 
 describe('ansiFrameToSvg', () => {
   it('renders plain text with the page background and default fg', () => {

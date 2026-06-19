@@ -13,7 +13,9 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { Box } from 'ink'
 import { render } from 'ink-testing-library'
+import { createElement } from 'react'
 
 if (!process.env.FORCE_COLOR) process.env.FORCE_COLOR = '3'
 
@@ -30,7 +32,7 @@ await build({
   stdin: {
     contents: [
       `export { scenes } from ${JSON.stringify(join(srcDir, 'scenes.tsx'))}`,
-      `export { ansiFrameToSvg } from ${JSON.stringify(join(srcDir, 'ansiToSvg.ts'))}`,
+      `export { ansiFrameToSvg, stripAnsi } from ${JSON.stringify(join(srcDir, 'ansiToSvg.ts'))}`,
     ].join('\n'),
     resolveDir: srcDir,
     loader: 'ts',
@@ -46,7 +48,7 @@ await build({
   logLevel: 'silent',
 })
 
-const { scenes, ansiFrameToSvg } = await import(pathToFileURL(bundlePath).href)
+const { scenes, ansiFrameToSvg, stripAnsi } = await import(pathToFileURL(bundlePath).href)
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -65,13 +67,16 @@ function pickRenderer() {
 const renderer = pickRenderer()
 const written = []
 for (const scene of scenes) {
-  const { lastFrame, unmount, stdin } = render(scene.node)
+  // `width` constrains the render to N columns (wrap the dynamic node in a Box).
+  const node = scene.width ? createElement(Box, { width: scene.width }, scene.node) : scene.node
+  const { lastFrame, unmount, stdin } = render(node)
   await delay(40)
   if (scene.input) {
     stdin.write(scene.input)
     await delay(40)
   }
-  const frame = lastFrame() ?? ''
+  // `noColor` simulates a NO_COLOR terminal by stripping all styling codes.
+  const frame = scene.noColor ? stripAnsi(lastFrame() ?? '') : (lastFrame() ?? '')
   unmount()
   const txt = join(outDir, `${scene.name}.txt`)
   const svg = join(outDir, `${scene.name}.svg`)
