@@ -452,10 +452,13 @@ describe('stopDaemonCommand', () => {
   it('reports failure when the process ignores the signal and never exits', async () => {
     const child = spawn(
       process.execPath,
-      ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1e6)"],
-      { stdio: 'ignore' },
+      // Print 'ready' AFTER the SIGTERM handler is installed, and wait for it, so the
+      // test never signals before the child can ignore it (the old fixed 50ms wait
+      // raced the child's startup on a loaded CI runner → it terminated by default).
+      ['-e', "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1e6)"],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
     )
-    await new Promise((r) => setTimeout(r, 50))
+    await new Promise<void>((resolve) => child.stdout?.once('data', () => resolve()))
     healthPid = child.pid
     writeDiscovery({ pid: child.pid })
     const result = await stopDaemonCommand(discoveryPath, { attempts: 2, intervalMs: 5 })
