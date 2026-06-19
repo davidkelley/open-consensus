@@ -299,6 +299,22 @@ describe('App', () => {
     expect(lastFrame()).not.toContain('SECRETSECRETSECRET')
   })
 
+  it('shows the brand busy indicator (◆ working…) while a command runs', async () => {
+    let release: () => void = () => undefined
+    const { stdin, lastFrame } = renderApp({
+      ensureDaemon: () =>
+        new Promise<void>((r) => {
+          release = r
+        }),
+    })
+    stdin.write('/runs') // /runs awaits ensureDaemon, so it stays busy until released
+    await tick()
+    stdin.write('\r')
+    await waitForFrame(lastFrame, '◆ working…')
+    expect(lastFrame()).toContain('◆ working…')
+    release()
+  })
+
   it('renders a thrown command error in the transcript', async () => {
     const { stdin, lastFrame } = renderApp()
     stdin.write('/run p') // missing prompt -> the command throws before any RPC

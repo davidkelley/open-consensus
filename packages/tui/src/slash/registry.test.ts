@@ -240,6 +240,18 @@ describe('slash registry', () => {
     expect(out.join('\n')).toMatch(/start one with .*\/run/)
   })
 
+  it('colors the /runs run id muted (receded, not a second accent)', async () => {
+    const captured: Segment[][] = []
+    const styled: SlashContext = {
+      ...ctx,
+      print: (l) => captured.push(typeof l === 'string' ? [{ text: l }] : l),
+    }
+    await (findCommand('runs') as NonNullable<ReturnType<typeof findCommand>>).run(styled, [], '')
+    const idSeg = captured[0]?.[0] // the run-id token
+    expect(idSeg?.text).toBe('r1')
+    expect(idSeg?.color).toBe(theme.muted)
+  })
+
   it('/runs lists runs and /run starts + views', async () => {
     await dispatch('runs')
     expect(out.join('\n')).toMatch(/r1 {2}running/)
